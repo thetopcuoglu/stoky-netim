@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kumaş Stok Yönetimi - Başlat</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f8fafc;
+        }
+        .card {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        h1 {
+            color: #1e293b;
+            margin-bottom: 20px;
+        }
+        .btn {
+            display: inline-block;
+            padding: 12px 24px;
+            background: #3b82f6;
+            color: white;
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: 500;
+            margin: 10px;
+            transition: all 0.2s;
+        }
+        .btn:hover {
+            background: #2563eb;
+            transform: translateY(-1px);
+        }
+        .instructions {
+            background: #f1f5f9;
+            padding: 20px;
+            border-radius: 6px;
+            margin: 20px 0;
+            text-align: left;
+        }
+        .step {
+            margin: 10px 0;
+            padding-left: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>🧵 Kumaş Stok Yönetimi</h1>
+        <p>Offline çalışan kumaş stok, sevk ve müşteri bakiye yönetim sistemi</p>
+        
+        <div class="instructions">
+            <h3>📋 Kullanım Talimatları:</h3>
+            <div class="step">1️⃣ Aşağıdaki butona tıklayarak uygulamayı açın</div>
+            <div class="step">2️⃣ İlk açılışta "Ayarlar" sayfasına gidin</div>
+            <div class="step">3️⃣ "Test Verisi Yükle" butonuna tıklayın</div>
+            <div class="step">4️⃣ "Müşteriler" > "Ömer Abi" seçerek özellikleri test edin</div>
+            <div class="step">5️⃣ Yeni sevk oluşturun ve makbuz yazdırın</div>
+        </div>
+        
+        <a href="index.html" class="btn">🚀 Uygulamayı Başlat</a>
+        
+        <div style="margin-top: 30px; font-size: 14px; color: #64748b;">
+            <p><strong>💾 Offline Çalışır:</strong> Tüm veriler tarayıcınızda saklanır</p>
+            <p><strong>🔒 Güvenli:</strong> Hiçbir veri sunucuya gönderilmez</p>
+            <p><strong>📱 Responsive:</strong> Mobil ve masaüstü uyumlu</p>
+        </div>
+    </div>
+
+    <script>
+        // Check if browser supports IndexedDB
+        if (!window.indexedDB) {
+            document.body.innerHTML = `
+                <div class="card">
+                    <h1>❌ Uyumsuz Tarayıcı</h1>
+                    <p>Bu uygulama IndexedDB desteği gerektirir.</p>
+                    <p>Lütfen güncel bir tarayıcı kullanın:</p>
+                    <ul style="text-align: left;">
+                        <li>Chrome 23+</li>
+                        <li>Firefox 10+</li>
+                        <li>Safari 7+</li>
+                        <li>Edge 12+</li>
+                    </ul>
+                </div>
+            `;
+        }
+    </script>
+</body>
+</html>

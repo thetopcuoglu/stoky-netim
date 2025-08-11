@@ -1,0 +1,277 @@
+/* Print Styles for Receipts and Statements */
+@media print {
+    /* Hide everything by default */
+    * {
+        visibility: hidden;
+    }
+    
+    /* Show only the printable content */
+    .printable,
+    .printable * {
+        visibility: visible;
+    }
+    
+    /* Position the printable content */
+    .printable {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        background: white;
+    }
+    
+    /* Reset margins and padding */
+    body {
+        margin: 0;
+        padding: 0;
+        background: white;
+        font-family: Arial, sans-serif;
+        font-size: 12pt;
+        line-height: 1.4;
+        color: black;
+    }
+    
+    /* Page setup */
+    @page {
+        margin: 1cm;
+        size: A4;
+    }
+    
+    /* Receipt/Statement Header */
+    .print-header {
+        text-align: center;
+        margin-bottom: 20pt;
+        border-bottom: 2pt solid black;
+        padding-bottom: 10pt;
+    }
+    
+    .print-header h1 {
+        font-size: 18pt;
+        font-weight: bold;
+        margin: 0 0 5pt 0;
+    }
+    
+    .print-header .company-info {
+        font-size: 10pt;
+        margin: 5pt 0;
+    }
+    
+    .print-header .document-title {
+        font-size: 16pt;
+        font-weight: bold;
+        margin-top: 10pt;
+    }
+    
+    /* Customer/Document Info */
+    .print-info-section {
+        margin-bottom: 15pt;
+    }
+    
+    .print-info-row {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 3pt;
+    }
+    
+    .print-info-label {
+        font-weight: bold;
+    }
+    
+    /* Tables */
+    .print-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 15pt;
+    }
+    
+    .print-table th {
+        background-color: #f0f0f0;
+        border: 1pt solid black;
+        padding: 5pt;
+        text-align: left;
+        font-weight: bold;
+        font-size: 10pt;
+    }
+    
+    .print-table td {
+        border: 1pt solid black;
+        padding: 5pt;
+        font-size: 10pt;
+    }
+    
+    .print-table .text-right {
+        text-align: right;
+    }
+    
+    .print-table .text-center {
+        text-align: center;
+    }
+    
+    /* Totals Section */
+    .print-totals {
+        float: right;
+        width: 40%;
+        margin-top: 10pt;
+    }
+    
+    .print-totals table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+    
+    .print-totals td {
+        padding: 3pt 8pt;
+        border-bottom: 1pt solid #ccc;
+    }
+    
+    .print-totals .total-label {
+        font-weight: bold;
+    }
+    
+    .print-totals .total-amount {
+        text-align: right;
+        font-weight: bold;
+    }
+    
+    .print-totals .grand-total {
+        border-top: 2pt solid black;
+        border-bottom: 2pt double black;
+        font-size: 12pt;
+    }
+    
+    /* Footer */
+    .print-footer {
+        position: fixed;
+        bottom: 1cm;
+        left: 0;
+        right: 0;
+        text-align: center;
+        font-size: 9pt;
+        color: #666;
+        border-top: 1pt solid #ccc;
+        padding-top: 5pt;
+    }
+    
+    /* Signature Area */
+    .print-signature {
+        margin-top: 30pt;
+        display: flex;
+        justify-content: space-between;
+    }
+    
+    .signature-box {
+        width: 40%;
+        text-align: center;
+    }
+    
+    .signature-line {
+        border-top: 1pt solid black;
+        margin-top: 20pt;
+        padding-top: 5pt;
+        font-size: 10pt;
+    }
+    
+    /* Balance Colors for Print */
+    .balance-positive {
+        color: black;
+        font-weight: bold;
+    }
+    
+    .balance-negative {
+        color: black;
+        font-weight: bold;
+        text-decoration: underline;
+    }
+    
+    .balance-zero {
+        color: black;
+    }
+    
+    /* Page Breaks */
+    .page-break {
+        page-break-before: always;
+    }
+    
+    .no-page-break {
+        page-break-inside: avoid;
+    }
+    
+    /* Hide elements that shouldn't be printed */
+    .no-print {
+        display: none !important;
+    }
+    
+    /* Specific styles for different document types */
+    
+    /* Shipment Receipt */
+    .shipment-receipt .print-header {
+        background-color: #f8f9fa;
+    }
+    
+    .shipment-receipt .document-title::after {
+        content: " - SEVK MAKBUZUr";
+    }
+    
+    /* Customer Statement */
+    .customer-statement .print-header {
+        background-color: #fff3cd;
+    }
+    
+    .customer-statement .document-title::after {
+        content: " - MÜŞTERİ EKSTRESİ";
+    }
+    
+    .customer-statement .balance-summary {
+        background-color: #f8f9fa;
+        padding: 10pt;
+        margin: 10pt 0;
+        border: 1pt solid black;
+    }
+    
+    .customer-statement .balance-summary h3 {
+        margin: 0 0 5pt 0;
+        font-size: 12pt;
+    }
+    
+    /* Statement specific table styling */
+    .statement-table .debit {
+        color: red;
+    }
+    
+    .statement-table .credit {
+        color: green;
+    }
+    
+    /* Ensure proper spacing */
+    h1, h2, h3, h4, h5, h6 {
+        page-break-after: avoid;
+    }
+    
+    tr {
+        page-break-inside: avoid;
+    }
+    
+    /* Date and time formatting */
+    .print-date {
+        font-size: 10pt;
+        color: #666;
+    }
+    
+    /* Notes section */
+    .print-notes {
+        margin-top: 15pt;
+        padding: 10pt;
+        border: 1pt solid #ccc;
+        background-color: #f9f9f9;
+    }
+    
+    .print-notes h4 {
+        margin: 0 0 5pt 0;
+        font-size: 11pt;
+    }
+    
+    .print-notes p {
+        margin: 0;
+        font-size: 10pt;
+    }
+}

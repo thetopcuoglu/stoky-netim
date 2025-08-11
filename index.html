@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kumaş Stok Yönetimi</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="print.css" media="print">
+</head>
+<body>
+    <div id="app">
+        <!-- Loading State -->
+        <div id="loading" class="loading-overlay">
+            <div class="spinner"></div>
+            <p>Yükleniyor...</p>
+        </div>
+
+        <!-- Navigation -->
+        <nav class="navbar">
+            <div class="nav-brand">
+                <h1>Kumaş Stok Yönetimi</h1>
+            </div>
+            <div class="nav-menu">
+                <a href="#dashboard" class="nav-link active" data-page="dashboard">Ana Sayfa</a>
+                <a href="#customers" class="nav-link" data-page="customers">Müşteriler</a>
+                <a href="#inventory" class="nav-link" data-page="inventory">Stok</a>
+                <a href="#shipments" class="nav-link" data-page="shipments">Sevkler</a>
+                <a href="#suppliers" class="nav-link" data-page="suppliers">Ödemeler</a>
+                <a href="#reports" class="nav-link" data-page="reports">Raporlar</a>
+                <a href="#settings" class="nav-link" data-page="settings">Ayarlar</a>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Dashboard Page -->
+            <div id="dashboard-page" class="page active">
+                <div class="dashboard-header">
+                    <h1 class="dashboard-title">İşletme Yönetim Paneli</h1>
+                    <div class="dashboard-period">Son 30 Gün</div>
+                    <div class="dashboard-actions">
+                        <button class="btn btn-primary" onclick="showNewShipmentModal()">
+                            <span class="icon">+</span>
+                            Yeni Sevk
+                        </button>
+                    </div>
+                </div>
+
+                <div class="dashboard-cards">
+                    <!-- Net Kar -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Net Kar</h3>
+                        </div>
+                        <div class="card-content">
+                            <div class="metric">
+                                <span class="value" id="net-profit">$0</span>
+                            </div>
+                            <div class="metric-row">
+                                <span class="label">Satışlar:</span>
+                                <span class="value positive" id="total-sales">$0</span>
+                            </div>
+                            <div class="metric-row">
+                                <span class="label">Maliyetler:</span>
+                                <span class="value negative" id="total-costs">$0</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Satışlar -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Satışlar (30 Gün)</h3>
+                        </div>
+                        <div class="card-content">
+                            <div class="metric">
+                                <span class="value" id="last30-shipment-usd">$0</span>
+                            </div>
+                            <div class="metric-row">
+                                <span class="label">Toplam Kg:</span>
+                                <span class="value" id="last30-shipment-kg">0 kg</span>
+                            </div>
+                            <div class="metric-row">
+                                <span class="label">Ort. Fiyat:</span>
+                                <span class="value" id="monthly-avg-price">$0/kg</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Stok -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Stok Durumu</h3>
+                        </div>
+                        <div class="card-content">
+                            <div class="metric">
+                                <span class="value" id="total-stock-kg">0</span>
+                                <span class="unit">kg</span>
+                            </div>
+                            <div class="metric-row">
+                                <span class="label">Stokta:</span>
+                                <span class="value" id="stock-available">0 kg</span>
+                            </div>
+                            <div class="metric-row">
+                                <span class="label">Kısmi:</span>
+                                <span class="value" id="stock-partial">0 kg</span>
+                            </div>
+                            <div class="metric-row">
+                                <span class="label">Biten:</span>
+                                <span class="value" id="stock-finished">0 adet</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Alacaklar -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Alacaklar</h3>
+                        </div>
+                        <div class="card-content">
+                            <div class="metric">
+                                <span class="value" id="open-receivables">$0</span>
+                            </div>
+                            <div class="metric-row">
+                                <span class="label">Müşteri Sayısı:</span>
+                                <span class="value" id="receivables-count">0</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="recent-activities">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Son Hareketler</h3>
+                        </div>
+                        <div class="card-content">
+                            <div id="recent-activities-list" class="activities-list">
+                                <!-- Recent activities will be populated here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Customers Page -->
+            <div id="customers-page" class="page">
+                <div class="page-header">
+                    <h2>Müşteriler</h2>
+                    <div class="page-actions">
+                        <button class="btn btn-primary" onclick="showNewCustomerModal()">
+                            <span class="icon">+</span>
+                            Yeni Müşteri
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="search-filter-bar">
+                    <input type="text" id="customer-search" placeholder="Müşteri ara..." class="search-input">
+                </div>
+                
+                <div class="table-container">
+                    <table id="customers-table" class="data-table">
+                        <thead>
+                            <tr>
+                                <th data-sort="name">Müşteri Adı</th>
+                                <th data-sort="phone">Telefon</th>
+                                <th data-sort="email">E-posta</th>
+                                <th data-sort="balance">Bakiye (USD)</th>
+                                <th>İşlemler</th>
+                            </tr>
+                        </thead>
+                        <tbody id="customers-table-body">
+                            <!-- Customer rows will be populated here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Customer Detail Page -->
+            <div id="customer-detail-page" class="page">
+                <div class="page-header">
+                    <button class="btn btn-secondary back-btn" onclick="showPage('customers')">
+                        ← Geri
+                    </button>
+                    <h2 id="customer-detail-name">Müşteri Detayı</h2>
+                    <div class="page-actions">
+                        <button class="btn btn-primary" onclick="showNewShipmentModal()">
+                            <span class="icon">+</span>
+                            Yeni Sevk
+                        </button>
+                        <button class="btn btn-secondary" onclick="showNewPaymentModal()">
+                            <span class="icon">$</span>
+                            Tahsilat Ekle
+                        </button>
+                        <button class="btn btn-outline" onclick="printCustomerStatement()">
+                            <span class="icon">📄</span>
+                            PDF Ekstre
+                        </button>
+                    </div>
+                </div>
+
+                <div class="customer-summary-cards">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Toplam Bakiye</h3>
+                        </div>
+                        <div class="card-content">
+                            <div class="metric">
+                                <span class="value" id="customer-total-balance">$0</span>
+                                <span class="unit">USD</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Son 30 Gün</h3>
+                        </div>
+                        <div class="card-content">
+                            <div class="metric-row">
+                                <span class="label">Sevk:</span>
+                                <span id="customer-30d-kg">0 kg</span>
+                            </div>
+                            <div class="metric-row">
+                                <span class="label">Toplam:</span>
+                                <span id="customer-30d-usd">$0 USD</span>
+                            </div>
+                            <div class="metric-row">
+                                <span class="label">Ort. Fiyat:</span>
+                                <span id="customer-30d-avg">$0/kg</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="customer-tabs">
+                    <div class="tab-buttons">
+                        <button class="tab-btn active" data-tab="shipments">Sevkler</button>
+                        <button class="tab-btn" data-tab="payments">Tahsilatlar</button>
+                        <button class="tab-btn" data-tab="statement">Ekstre</button>
+                    </div>
+
+                    <div class="tab-content">
+                        <div id="shipments-tab" class="tab-pane active">
+                            <div class="tab-filters">
+                                <select id="shipments-period-filter">
+                                    <option value="7">Son 7 Gün</option>
+                                    <option value="30" selected>Son 30 Gün</option>
+                                    <option value="90">Son 90 Gün</option>
+                                    <option value="all">Tümü</option>
+                                    <option value="custom">Özel Tarih</option>
+                                </select>
+                                <div id="custom-date-range" class="date-range hidden">
+                                    <input type="date" id="shipments-start-date">
+                                    <input type="date" id="shipments-end-date">
+                                </div>
+                            </div>
+                            <div class="table-container">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Tarih</th>
+                                            <th>Ürün</th>
+                                            <th>Parti</th>
+                                            <th>Kg</th>
+                                            <th>Birim (USD)</th>
+                                            <th>Toplam (USD)</th>
+                                            <th>İşlemler</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="customer-shipments-table">
+                                        <!-- Shipment rows will be populated here -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div id="payments-tab" class="tab-pane">
+                            <div class="table-container">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Tarih</th>
+                                            <th>Tutar (USD)</th>
+                                            <th>Yöntem</th>
+                                            <th>Not</th>
+                                            <th>İşlemler</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="customer-payments-table">
+                                        <!-- Payment rows will be populated here -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div id="statement-tab" class="tab-pane">
+                            <div class="tab-filters">
+                                <select id="statement-period-filter">
+                                    <option value="30">Son 30 Gün</option>
+                                    <option value="90">Son 90 Gün</option>
+                                    <option value="all">Tümü</option>
+                                    <option value="custom">Özel Tarih</option>
+                                </select>
+                                <div id="statement-custom-date-range" class="date-range hidden">
+                                    <input type="date" id="statement-start-date">
+                                    <input type="date" id="statement-end-date">
+                                </div>
+                            </div>
+                            <div class="table-container">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Tarih</th>
+                                            <th>Açıklama</th>
+                                            <th>Borç (USD)</th>
+                                            <th>Alacak (USD)</th>
+                                            <th>Bakiye (USD)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="customer-statement-table">
+                                        <!-- Statement rows will be populated here -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Inventory Page -->
+            <div id="inventory-page" class="page">
+                <div class="page-header">
+                    <h2>Stok (Partiler)</h2>
+                    <div class="page-actions">
+                        <button class="btn btn-primary" onclick="showNewLotModal()">
+                            <span class="icon">+</span>
+                            Yeni Parti
+                        </button>
+                        <button class="btn btn-secondary" onclick="exportInventoryCSV()">CSV Dışa Aktar</button>
+                        <button class="btn btn-secondary" onclick="showImportCSVModal()">CSV İçe Aktar</button>
+                    </div>
+                </div>
+                
+                <div class="search-filter-bar">
+                    <input type="text" id="inventory-search" placeholder="Parti ara..." class="search-input">
+                    <select id="inventory-product-filter" class="filter-select">
+                        <option value="">Tüm Ürünler</option>
+                    </select>
+                    <select id="inventory-status-filter" class="filter-select">
+                        <option value="">Tüm Durumlar</option>
+                        <option value="Stokta">Stokta</option>
+                        <option value="Kısmi">Kısmi</option>
+                        <option value="Bitti">Bitti</option>
+                    </select>
+                </div>
+                
+                <div class="table-container">
+                    <table id="inventory-table" class="data-table">
+                        <thead>
+                            <tr>
+                                <th data-sort="productName">Kumaş</th>
+                                <th data-sort="party">Parti</th>
+                                <th data-sort="color">Renk</th>
+                                <th data-sort="location">Konum</th>
+                                <th data-sort="remainingKg">Kalan (kg)</th>
+                                <th data-sort="status">Durum</th>
+                                <th data-sort="date">Tarih</th>
+                                <th>İşlemler</th>
+                            </tr>
+                        </thead>
+                        <tbody id="inventory-table-body">
+                            <!-- Inventory rows will be populated here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Shipments Page -->
+            <div id="shipments-page" class="page">
+                <div class="page-header">
+                    <h2>Sevkler</h2>
+                    <div class="page-actions">
+                        <button class="btn btn-primary" onclick="showNewShipmentModal()">
+                            <span class="icon">+</span>
+                            Yeni Sevk
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="search-filter-bar">
+                    <input type="text" id="shipments-search" placeholder="Sevk ara..." class="search-input">
+                    <select id="shipments-customer-filter" class="filter-select">
+                        <option value="">Tüm Müşteriler</option>
+                    </select>
+                    <select id="shipments-period-filter" class="filter-select">
+                        <option value="7">Son 7 Gün</option>
+                        <option value="30">Son 30 Gün</option>
+                        <option value="90">Son 90 Gün</option>
+                        <option value="all">Tüm Zamanlar</option>
+                    </select>
+                </div>
+                
+                <div class="table-container">
+                    <table id="shipments-table" class="data-table">
+                        <thead>
+                            <tr>
+                                <th data-sort="id">Sevk No</th>
+                                <th data-sort="date">Tarih</th>
+                                <th data-sort="customerName">Müşteri</th>
+                                <th data-sort="totalKg">Toplam Kg</th>
+                                <th data-sort="totalUsd">Toplam USD</th>
+                                <th data-sort="note">Not</th>
+                                <th>İşlemler</th>
+                            </tr>
+                        </thead>
+                        <tbody id="shipments-table-body">
+                            <!-- Shipment rows will be populated here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Suppliers/Payments Page -->
+            <div id="suppliers-page" class="page">
+                <div class="page-header">
+                    <h2>Tedarikçi Ödemeleri</h2>
+                    <div class="page-actions">
+                        <button class="btn btn-primary" onclick="showNewSupplierModal()">
+                            <span class="icon">+</span>
+                            Yeni Tedarikçi
+                        </button>
+                        <button class="btn btn-secondary" onclick="showNewSupplierPaymentModal()">
+                            <span class="icon">$</span>
+                            Ödeme Yap
+                        </button>
+                    </div>
+                </div>
+
+                <div class="search-filter-bar">
+                    <select id="costs-product-filter" class="filter-select">
+                        <option value="">Tüm Ürünler</option>
+                    </select>
+                    <select id="costs-status-filter" class="filter-select">
+                        <option value="">Tüm Durumlar</option>
+                        <option value="pending">Ödeme Bekliyor</option>
+                        <option value="partial">Kısmi Ödendi</option>
+                        <option value="paid">Ödendi</option>
+                    </select>
+                </div>
+
+                <!-- Ödeme Özeti -->
+                <div class="payment-summary-section">
+                    <div class="summary-cards">
+                        <div class="summary-card">
+                            <div class="summary-card-header">
+                                <h4>İplik Tedarikçisi</h4>
+                                <span class="summary-icon">🧵</span>
+                            </div>
+                            <div class="summary-card-content">
+                                <div class="summary-amount">
+                                    <span class="amount-label">Ödenecek:</span>
+                                    <span class="amount-value" id="yarn-outstanding">$0</span>
+                                </div>
+                                <div class="summary-amount">
+                                    <span class="amount-label">Toplam Borç:</span>
+                                    <span class="amount-value" id="yarn-total">$0</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="summary-card">
+                            <div class="summary-card-header">
+                                <h4>Örme Tedarikçisi</h4>
+                                <span class="summary-icon">🧶</span>
+                            </div>
+                            <div class="summary-card-content">
+                                <div class="summary-amount">
+                                    <span class="amount-label">Ödenecek:</span>
+                                    <span class="amount-value" id="knitting-outstanding">$0</span>
+                                </div>
+                                <div class="summary-amount">
+                                    <span class="amount-label">Toplam Borç:</span>
+                                    <span class="amount-value" id="knitting-total">$0</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="summary-card">
+                            <div class="summary-card-header">
+                                <h4>Boyahane</h4>
+                                <span class="summary-icon">🎨</span>
+                            </div>
+                            <div class="summary-card-content">
+                                <div class="summary-amount">
+                                    <span class="amount-label">Ödenecek:</span>
+                                    <span class="amount-value" id="dyeing-outstanding">$0</span>
+                                </div>
+                                <div class="summary-amount">
+                                    <span class="amount-label">Toplam Borç:</span>
+                                    <span class="amount-value" id="dyeing-total">$0</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="summary-card total-card">
+                            <div class="summary-card-header">
+                                <h4>Genel Toplam</h4>
+                                <span class="summary-icon">💰</span>
+                            </div>
+                            <div class="summary-card-content">
+                                <div class="summary-amount">
+                                    <span class="amount-label">Toplam Ödenecek:</span>
+                                    <span class="amount-value total-outstanding" id="total-outstanding">$0</span>
+                                </div>
+                                <div class="summary-amount">
+                                    <span class="amount-label">Toplam Borç:</span>
+                                    <span class="amount-value total-debt" id="total-debt">$0</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Parti</th>
+                                <th>Ürün</th>
+                                <th>Toplam KG</th>
+                                <th>İplik (USD/KG)</th>
+                                <th>İplik Toplam</th>
+                                <th>Örme (USD/KG)</th>
+                                <th>Örme Toplam</th>
+                                <th>Boyahane (USD/KG)</th>
+                                <th>Boyahane Toplam</th>
+                                <th>Toplam Maliyet</th>
+                                <th>Ödenen</th>
+                                <th>Kalan</th>
+                                <th>Durum</th>
+                                <th>İşlemler</th>
+                            </tr>
+                        </thead>
+                        <tbody id="production-costs-table">
+                            <!-- Production costs will be populated here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Reports Page -->
+            <div id="reports-page" class="page">
+                <div class="page-header">
+                    <h2>Raporlar</h2>
+                </div>
+                
+                <div class="reports-grid">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Müşteri Bazlı Sevk Raporu</h3>
+                        </div>
+                        <div class="card-content">
+                            <p>Son 30 günde müşterilere göre sevk toplamları</p>
+                            <button class="btn btn-primary" onclick="generateCustomerShipmentReport()">
+                                <span class="icon">📊</span>
+                                Rapor Oluştur
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Ürün Bazlı Sevk Raporu</h3>
+                        </div>
+                        <div class="card-content">
+                            <p>Ürünlere göre sevk analizi</p>
+                            <button class="btn btn-primary" onclick="generateProductShipmentReport()">
+                                <span class="icon">📊</span>
+                                Rapor Oluştur
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Tahsilat Raporu</h3>
+                        </div>
+                        <div class="card-content">
+                            <p>Tahsilat hareketleri ve yöntemleri</p>
+                            <button class="btn btn-primary" onclick="generatePaymentReport()">
+                                <span class="icon">📊</span>
+                                Rapor Oluştur
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="report-results" class="report-results hidden">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 id="report-title">Rapor Sonuçları</h3>
+                            <button class="btn btn-secondary" onclick="exportReportCSV()">
+                                <span class="icon">📥</span>
+                                CSV Dışa Aktar
+                            </button>
+                        </div>
+                        <div class="card-content">
+                            <div class="table-container">
+                                <table id="report-table" class="data-table">
+                                    <thead id="report-table-head">
+                                        <!-- Report headers will be populated here -->
+                                    </thead>
+                                    <tbody id="report-table-body">
+                                        <!-- Report data will be populated here -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Settings Page -->
+            <div id="settings-page" class="page">
+                <div class="page-header">
+                    <h2>Ayarlar</h2>
+                </div>
+                
+                <div class="settings-sections">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Firma Bilgileri</h3>
+                        </div>
+                        <div class="card-content">
+                            <form id="company-settings-form">
+                                <div class="form-group">
+                                    <label for="company-name">Firma Adı</label>
+                                    <input type="text" id="company-name" name="companyName" placeholder="Firma adınızı girin">
+                                </div>
+                                <div class="form-group">
+                                    <label for="company-address">Adres</label>
+                                    <textarea id="company-address" name="companyAddress" placeholder="Firma adresinizi girin"></textarea>
+                                </div>
+                                <div class="form-group">
+                                    <label for="company-phone">Telefon</label>
+                                    <input type="text" id="company-phone" name="companyPhone" placeholder="Telefon numaranızı girin">
+                                </div>
+                                                        <div class="form-group">
+                            <label for="company-logo-text">Logo Metni</label>
+                            <input type="text" id="company-logo-text" name="companyLogoText" placeholder="PDF'lerde görünecek logo metni">
+                        </div>
+                        <div class="form-group">
+                            <label for="company-logo">Logo Resmi</label>
+                            <input type="file" id="company-logo" name="companyLogo" accept="image/*" onchange="handleLogoUpload(this)">
+                            <small class="text-muted">PNG, JPG veya SVG formatında logo yükleyebilirsiniz</small>
+                            <div id="logo-preview" class="logo-preview hidden">
+                                <img id="logo-preview-img" alt="Logo önizleme" style="max-width: 200px; max-height: 100px; border: 1px solid #ddd; border-radius: 4px; margin-top: 10px;">
+                                <button type="button" class="btn btn-sm btn-danger" onclick="removeLogo()" style="margin-left: 10px;">Logoyu Kaldır</button>
+                            </div>
+                        </div>
+                        <button type="submit" class="btn btn-primary">
+                            <span class="icon">💾</span>
+                            Kaydet
+                        </button>
+                            </form>
+                        </div>
+                    </div>
+                    
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Veri Yönetimi</h3>
+                        </div>
+                        <div class="card-content">
+                            <div class="data-management-actions">
+                                <button class="btn btn-secondary" onclick="loadTestData()">
+                                    <span class="icon">🧪</span>
+                                    Test Verisi Yükle
+                                </button>
+                                <button class="btn btn-secondary" onclick="exportData()">
+                                    <span class="icon">📤</span>
+                                    Veri Dışa Aktar (JSON)
+                                </button>
+                                <button class="btn btn-secondary" onclick="showImportDataModal()">
+                                    <span class="icon">📥</span>
+                                    Veri İçe Aktar (JSON)
+                                </button>
+                                <button class="btn btn-danger" onclick="clearAllData()">
+                                    <span class="icon">🗑️</span>
+                                    Tüm Veriyi Temizle
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Toast Notifications -->
+        <div id="toast-container" class="toast-container">
+            <!-- Toast messages will be added here -->
+        </div>
+    </div>
+
+    <!-- Modals will be added here by JavaScript -->
+    <div id="modal-container"></div>
+
+    <script src="js/utils.js"></script>
+    <script src="js/database.js"></script>
+    <script src="js/services.js"></script>
+    <script src="js/modals.js"></script>
+    <script src="js/pages.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
