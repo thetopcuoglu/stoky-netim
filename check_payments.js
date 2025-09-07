@@ -1,0 +1,1 @@
+console.log('Tedarikçi ödemeleri:'); db.readAll('supplierPayments').then(payments => { console.log('Toplam ödeme sayısı:', payments.length); payments.forEach(p => console.log('Ödeme:', p.date, p.amount, p.supplierType || p.supplierId)); });

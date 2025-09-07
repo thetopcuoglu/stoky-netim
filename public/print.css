@@ -209,7 +209,7 @@
     }
     
     .shipment-receipt .document-title::after {
-        content: " - SEVK MAKBUZU";
+        content: " - SEVK MAKBUZUr";
     }
     
     /* Customer Statement */

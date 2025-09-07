@@ -1,0 +1,16 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Tüm koleksiyonlara okuma ve yazma izni (geliştirme için)
+    // Prodüksiyonda daha sıkı kurallar kullanılmalı
+    match /{document=**} {
+      allow read, write: if true;
+    }
+    
+    // Özel kurallar (gelecekte eklenebilir)
+    // Örnek: Sadece belirli kullanıcıların erişimi
+    // match /customers/{customerId} {
+    //   allow read, write: if request.auth != null;
+    // }
+  }
+} 

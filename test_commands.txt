@@ -1,0 +1,4 @@
+Tarayıcıda test etmek için console'da şu komutları çalıştır:
+1. console.log(typeof deleteSupplierPayment);
+2. console.log(deleteSupplierPayment);
+3. db.readAll('supplierPayments').then(p => console.log('Ödemeler:', p));

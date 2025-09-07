@@ -1993,7 +1993,6 @@ async function saveSupplier(isEdit = false) {
 
 // Supplier Payment Modal
 function showNewSupplierPaymentModal() {
-	const currentSupplierId = window.currentSupplierId || '';
 	const modalHtml = `
 		<div class="modal-overlay">
 			<div class="modal" style="width: 600px;">
@@ -2004,8 +2003,13 @@ function showNewSupplierPaymentModal() {
 				<div class="modal-content">
 					<form id="supplier-payment-form">
 						<div class="form-group">
-							<label for="payment-supplier">Tedarikçi (detaydan geldiysen otomatik) *</label>
-							<input type="text" id="payment-supplier" value="${document.getElementById('supplier-detail-name')?.textContent||''}" placeholder="Tedarikçi adı" readonly>
+							<label for="payment-supplier-type">Tedarikçi *</label>
+							<select id="payment-supplier-type" name="supplierType" required onchange="updatePaymentCurrency()">
+								<option value="">Tedarikçi seçin</option>
+								<option value="iplik">İplikçi</option>
+								<option value="orme">Örme</option>
+								<option value="boyahane">Boyahane</option>
+							</select>
 						</div>
 						
 						<div class="form-row">
@@ -2088,10 +2092,9 @@ async function saveSupplierPayment() {
 		}
 		
 		const paymentData = {
-			supplierId: window.currentSupplierId || null,
-			supplierType: 'boyahane',
-			amount: amountUSD,
-			originalAmount: amount,
+			supplierType: formData.get('supplierType'),
+			amount: amountUSD, // İçerde USD olarak sakla
+			originalAmount: amount, // Orijinal tutarı da sakla
 			originalCurrency: currency,
 			exchangeRate: exchangeRate,
 			method: formData.get('method'),
@@ -2665,23 +2668,23 @@ async function showSupplierPriceListModal() {
 				<tr>
 					<td>${p.name}</td>
 					<td>
-						<input type="number" class="price-input" data-product-id="${p.id}" value="${val}" step="0.01" min="0" placeholder="TL/KG">
+						<input type=\"number\" class=\"price-input\" data-product-id=\"${p.id}\" value=\"${val}\" step=\"0.01\" min=\"0\" placeholder=\"TL/KG\">
 					</td>
 					<td>
-						<button class="btn btn-sm btn-primary" onclick="saveSupplierProductPrice('${p.id}')">Kaydet</button>
+						<button class=\"btn btn-sm btn-primary\" onclick=\"saveSupplierProductPrice('${p.id}')\">Kaydet</button>
 					</td>
 				</tr>
 			`;
 		}).join('');
 		const html = `
-			<div class="modal-overlay">
-				<div class="modal" style="width: 700px; max-height: 80vh;">
-					<div class="modal-header">
+			<div class=\"modal-overlay\">
+				<div class=\"modal\" style=\"width: 700px; max-height: 80vh;\">
+					<div class=\"modal-header\">
 						<h3>Tedarikçi Fiyat Listesi (TL/KG)</h3>
-						<button class="modal-close" onclick="ModalManager.hide()">×</button>
+						<button class=\"modal-close\" onclick=\"ModalManager.hide()\">×</button>
 					</div>
-					<div class="modal-content">
-						<table class="data-table">
+					<div class=\"modal-content\">
+						<table class=\"data-table\">
 							<thead>
 								<tr>
 									<th>Kumaş</th>
@@ -2692,9 +2695,9 @@ async function showSupplierPriceListModal() {
 							<tbody>${rows}</tbody>
 						</table>
 					</div>
-					<div class="modal-footer">
-						<button type="button" class="btn btn-secondary" onclick="ModalManager.hide()">Kapat</button>
-						<button type="button" class="btn btn-primary" onclick="saveAllSupplierPrices()">Tümünü Kaydet</button>
+					<div class=\"modal-footer\">
+						<button type=\"button\" class=\"btn btn-secondary\" onclick=\"ModalManager.hide()\">Kapat</button>
+						<button type=\"button\" class=\"btn btn-primary\" onclick=\"saveAllSupplierPrices()\">Tümünü Kaydet</button>
 					</div>
 				</div>
 			</div>`;
@@ -2708,7 +2711,7 @@ async function showSupplierPriceListModal() {
 async function saveSupplierProductPrice(productId) {
 	try {
 		const supplierId = window.currentSupplierId;
-		const input = document.querySelector(`.price-input[data-product-id="${productId}"]`);
+		const input = document.querySelector(`.price-input[data-product-id=\"${productId}\"]`);
 		const price = NumberUtils.parseNumber(input.value);
 		if (price < 0) { Toast.error('Fiyat negatif olamaz'); return; }
 		await SupplierService.setSupplierProductPrice(supplierId, productId, price, 'TRY');
@@ -2780,102 +2783,3 @@ window.saveAllPrices = saveAllPrices;
 window.showSupplierPriceListModal = showSupplierPriceListModal;
 window.saveSupplierProductPrice = saveSupplierProductPrice;
 window.saveAllSupplierPrices = saveAllSupplierPrices;
-
-// Hızlı Tedarikçi Dekont Modal
-function showSupplierQuickReceiptModal() {
-	const html = `
-		<div class="modal-overlay">
-			<div class="modal" style="width: 520px;">
-				<div class="modal-header">
-					<h3>Dekont Yazdır</h3>
-					<button class="modal-close" onclick="ModalManager.hide()">×</button>
-				</div>
-				<div class="modal-content">
-					<form id="supplier-receipt-form">
-						<div class="form-group">
-							<label for="receipt-amount-usd">Tutar (USD) *</label>
-							<input type="number" id="receipt-amount-usd" step="0.01" min="0.01" required placeholder="$">
-						</div>
-						<div class="form-group">
-							<label for="receipt-exchange">Kur (USD/TL)</label>
-							<input type="number" id="receipt-exchange" step="0.01" min="0.01" value="${(window.currentExchangeRate||30.50).toFixed(2)}">
-						</div>
-						<div class="form-group">
-							<label for="receipt-date">Tarih *</label>
-							<input type="date" id="receipt-date" required value="${DateUtils.getInputDate()}">
-						</div>
-						<div class="form-group">
-							<label for="receipt-method">Yöntem</label>
-							<select id="receipt-method">
-								<option value="Nakit">Nakit</option>
-								<option value="Havale">Havale</option>
-								<option value="EFT">EFT</option>
-								<option value="Çek">Çek</option>
-							</select>
-						</div>
-						<div class="form-group">
-							<label for="receipt-note">Not</label>
-							<input type="text" id="receipt-note" placeholder="Opsiyonel">
-						</div>
-					</form>
-				</div>
-				<div class="modal-footer">
-					<button class="btn btn-secondary" onclick="ModalManager.hide()">İptal</button>
-					<button class="btn btn-primary" onclick="printSupplierQuickReceipt()">Yazdır</button>
-				</div>
-			</div>
-		</div>`;
-	ModalManager.show(html);
-}
-
-async function printSupplierQuickReceipt() {
-	try {
-		const usd = NumberUtils.parseNumber(document.getElementById('receipt-amount-usd').value);
-		const rate = NumberUtils.parseNumber(document.getElementById('receipt-exchange').value) || (window.currentExchangeRate||30.50);
-		const date = document.getElementById('receipt-date').value;
-		const method = document.getElementById('receipt-method').value;
-		const note = document.getElementById('receipt-note').value.trim();
-		if (usd <= 0 || !date) { Toast.error('Tutar ve tarih zorunlu'); return; }
-		const tryAmount = NumberUtils.round(usd * rate, 2);
-		const companyName = await window.db.getSetting('companyName', 'Kumaş Stok Yönetimi');
-		const supplierName = document.getElementById('supplier-detail-name')?.textContent || 'Tedarikçi';
-		const now = new Date();
-		const printTs = `${now.getDate().toString().padStart(2,'0')}.${(now.getMonth()+1).toString().padStart(2,'0')}.${now.getFullYear()} ${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`;
-		const w = window.open('', '_blank', 'width=800,height=600');
-		if (!w) { Toast.error('Popup engellendi'); return; }
-		const html = `
-		<!doctype html><html lang="tr"><head><meta charset="utf-8"><title>Dekont - ${companyName}</title>
-		<style>
-		@media print { @page { margin: 1cm; size: A4; } }
-		body{font-family:Arial,sans-serif;margin:0;padding:24px;color:#000}
-		.header{border-bottom:2px solid #000;padding-bottom:12px;margin-bottom:12px;text-align:center}
-		.row{display:flex;justify-content:space-between;margin:6px 0}
-		.label{font-weight:bold}
-		.box{border:1px solid #000;padding:12px;margin-top:12px}
-		</style></head><body>
-		<div class="header">
-			<h2>${companyName}</h2>
-			<div>Tedarikçiye Ödeme Dekontu</div>
-		</div>
-		<div class="box">
-			<div class="row"><span class="label">Tedarikçi</span><span>${supplierName}</span></div>
-			<div class="row"><span class="label">Tarih</span><span>${DateUtils.formatDate(date)}</span></div>
-			<div class="row"><span class="label">Ödeme Yöntemi</span><span>${method||'-'}</span></div>
-			<div class="row"><span class="label">Tutar (USD)</span><span>${NumberUtils.formatUSD(usd)}</span></div>
-			<div class="row"><span class="label">Kur (USD/TL)</span><span>${rate.toFixed(2)}</span></div>
-			<div class="row"><span class="label">Tutar (TL)</span><span>${NumberUtils.formatTRY(tryAmount)}</span></div>
-			${note?`<div class="row"><span class="label">Not</span><span>${note}</span></div>`:''}
-		</div>
-		<div style="margin-top:12px;font-size:12px;color:#333">Düzenleme: ${printTs}</div>
-		<script>window.print()</script>
-		</body></html>`;
-		w.document.write(html); w.document.close();
-		ModalManager.hide();
-	} catch (e) {
-		console.error('printSupplierQuickReceipt error:', e);
-		Toast.error('Dekont yazdırma hatası');
-	}
-}
-
-window.showSupplierQuickReceiptModal = showSupplierQuickReceiptModal;
-window.printSupplierQuickReceipt = printSupplierQuickReceipt;

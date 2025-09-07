@@ -1,0 +1,118 @@
+{
+  "name": "MeshSoft - İşletme Yönetim Sistemi",
+  "short_name": "MeshSoft",
+  "description": "MeshSoft - Modern işletme yönetimi için kapsamlı çözüm. Stok takibi, müşteri yönetimi, sevk işlemleri ve raporlama araçları",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1a1a1a",
+  "theme_color": "#1a1a1a",
+  "orientation": "any",
+  "scope": "/",
+  "lang": "tr",
+  "dir": "ltr",
+  "categories": ["business", "productivity", "utilities", "finance"],
+  "screenshots": [
+    {
+      "src": "assets/images/screenshots/meshsoft-desktop.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "MeshSoft Desktop Dashboard"
+    },
+    {
+      "src": "assets/images/screenshots/meshsoft-mobile.png", 
+      "sizes": "375x667",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "MeshSoft Mobile Interface"
+    }
+  ],
+  "icons": [
+    {
+      "src": "assets/images/logos/meshsoftsiyah.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/images/logos/meshsoftsiyah.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/images/logos/meshsoftsiyah.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "assets/images/logos/meshsoftsiyah.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Hızlı Stok Ekle",
+      "short_name": "Stok",
+      "description": "Yeni stok kalemi ekle",
+      "url": "/index.html#inventory",
+      "icons": [
+        {
+          "src": "assets/images/icons/shortcut-stok.png",
+          "sizes": "96x96"
+        }
+      ]
+    },
+    {
+      "name": "Yeni Sevkiyat",
+      "short_name": "Sevk",
+      "description": "Sevkiyat işlemi başlat",
+      "url": "/index.html#shipments",
+      "icons": [
+        {
+          "src": "assets/images/icons/shortcut-sevk.png",
+          "sizes": "96x96"
+        }
+      ]
+    },
+    {
+      "name": "Müşteri Yönetimi",
+      "short_name": "Müşteri",
+      "description": "Müşteri kayıtları ve bakiyeler",
+      "url": "/index.html#customers",
+      "icons": [
+        {
+          "src": "assets/images/icons/shortcut-musteri.png",
+          "sizes": "96x96"
+        }
+      ]
+    },
+    {
+      "name": "Raporlar",
+      "short_name": "Rapor",
+      "description": "İş analitiği ve raporlar",
+      "url": "/index.html#reports",
+      "icons": [
+        {
+          "src": "assets/images/icons/shortcut-rapor.png",
+          "sizes": "96x96"
+        }
+      ]
+    }
+  ],
+  "related_applications": [],
+  "prefer_related_applications": false,
+  "edge_side_panel": {
+    "preferred_width": 420
+  },
+  "display_override": ["window-controls-overlay", "standalone"],
+  "protocol_handlers": [
+    {
+      "protocol": "web+meshsoft",
+      "url": "/handle?type=%s"
+    }
+  ]
+} 
