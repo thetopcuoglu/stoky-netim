@@ -140,10 +140,11 @@ async function loadDashboard() {
         // }
 
         // Paralel olarak tüm dashboard verilerini çek
-        const [summary, recentActivities, enhancedData] = await Promise.all([
+        const [summary, recentActivities, enhancedData, stockAlerts] = await Promise.all([
             DashboardService.getSummary(),
             DashboardService.getRecentActivities(),
-            getEnhancedDashboardData()
+            getEnhancedDashboardData(),
+            StockAlertService.getLowStockAlerts()
         ]);
         
         // Döviz kuru güncelle (eğer yoksa)
@@ -162,6 +163,9 @@ async function loadDashboard() {
         // Verileri cache'le - geçici olarak devre dışı
         const dashboardData = { summary, recentActivities, enhancedData };
         // DashboardCache.set(dashboardData);
+        
+        // Stok uyarılarını kontrol et ve göster
+        updateStockAlerts(stockAlerts);
         
         // UI'ı güncelle
         updateDashboardUI(dashboardData);
@@ -226,6 +230,51 @@ function updateDashboardUI(dashboardData) {
                 </div>
             `).join('');
         }
+    }
+}
+
+// Stock Alerts Functions
+function updateStockAlerts(alerts) {
+    const alertsSection = document.getElementById('stock-alerts-section');
+    const alertsList = document.getElementById('stock-alerts-list');
+    
+    if (!alertsSection || !alertsList) {
+        console.warn('Stock alerts elements not found');
+        return;
+    }
+    
+    if (!alerts || alerts.length === 0) {
+        alertsSection.style.display = 'none';
+        return;
+    }
+    
+    // Uyarıları göster
+    alertsSection.style.display = 'block';
+    
+    // Uyarı listesini oluştur
+    alertsList.innerHTML = alerts.map(alert => `
+        <div class="stock-alert-item ${alert.severity}">
+            <div class="stock-alert-icon">
+                ${alert.severity === 'critical' ? '🚨' : '⚠️'}
+            </div>
+            <div class="stock-alert-content">
+                <div class="stock-alert-product">${alert.productName}</div>
+                <div class="stock-alert-message">${alert.message}</div>
+            </div>
+            <div class="stock-alert-stock">
+                ${NumberUtils.formatKg(alert.currentStock)}
+            </div>
+        </div>
+    `).join('');
+    
+    console.log(`⚠️ ${alerts.length} stok uyarısı gösteriliyor`);
+}
+
+function dismissStockAlerts() {
+    const alertsSection = document.getElementById('stock-alerts-section');
+    if (alertsSection) {
+        alertsSection.style.display = 'none';
+        console.log('📢 Stok uyarıları kapatıldı');
     }
 }
 
@@ -426,6 +475,9 @@ async function loadCustomersPage() {
             }))
         );
         
+        // Alacaklar özetini güncelle
+        updateCustomersSummary(customersWithBalance);
+        
         renderCustomersTable(customersWithBalance);
         
         // Setup search
@@ -444,6 +496,31 @@ async function loadCustomersPage() {
         console.error('Customers page load error:', error);
         Toast.error('Müşteri listesi yüklenirken hata oluştu');
     }
+}
+
+// Müşteriler sayfası alacaklar özeti güncelle
+function updateCustomersSummary(customers) {
+    // Borçlu müşterileri filtrele (bakiye > 0)
+    const customersWithDebt = customers.filter(c => (c.balance || 0) > 0);
+    
+    // Toplam alacak
+    const totalReceivables = customersWithDebt.reduce((sum, c) => sum + (c.balance || 0), 0);
+    
+    // Borçlu müşteri sayısı
+    const debtCount = customersWithDebt.length;
+    
+    // Ortalama borç
+    const avgDebt = debtCount > 0 ? totalReceivables / debtCount : 0;
+    
+    // Kartları güncelle
+    const totalEl = document.getElementById('customers-total-receivables');
+    if (totalEl) totalEl.textContent = NumberUtils.formatUSD(totalReceivables);
+    
+    const countEl = document.getElementById('customers-with-debt-count');
+    if (countEl) countEl.textContent = debtCount;
+    
+    const avgEl = document.getElementById('customers-avg-debt');
+    if (avgEl) avgEl.textContent = NumberUtils.formatUSD(avgDebt);
 }
 
 function renderCustomersTable(customers) {
@@ -528,6 +605,23 @@ async function loadCustomerDetail(customerId) {
             return;
         }
         
+        // Aktif müşteri kimliğini kaydet ve tabloları/sekmeleri resetle
+        window.currentCustomerDetailId = customerId;
+        try {
+            const paymentsTbody = document.getElementById('customer-payments-table');
+            if (paymentsTbody) paymentsTbody.innerHTML = '';
+            const shipmentsTbody = document.getElementById('customer-shipments-table');
+            if (shipmentsTbody) shipmentsTbody.innerHTML = '';
+            const tabButtons = document.querySelectorAll('.tab-btn');
+            const tabPanes = document.querySelectorAll('.tab-pane');
+            tabButtons.forEach(btn => btn.classList.remove('active'));
+            tabPanes.forEach(pane => pane.classList.remove('active'));
+            const shipmentsBtn = Array.from(tabButtons).find(b => b.dataset.tab === 'shipments');
+            if (shipmentsBtn) shipmentsBtn.classList.add('active');
+            const shipmentsPane = document.getElementById('shipments-tab');
+            if (shipmentsPane) shipmentsPane.classList.add('active');
+        } catch (_) {}
+
         // Update page title
         DOMUtils.setText('#customer-detail-name', customer.name);
         
@@ -592,77 +686,155 @@ function setupCustomerTabs(customerId) {
 
 async function loadCustomerShipments(customerId) {
     try {
+        // Verileri al ve cache'le
         const shipments = await ShipmentService.getByCustomerId(customerId);
-        const tbody = document.getElementById('customer-shipments-table');
-        
-        if (shipments.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7" class="text-center">Sevk bulunamadı</td></tr>';
-            return;
+        window.currentCustomerShipments = shipments;
+
+        // Dönem filtresi UI ayarları
+        const periodSelect = document.getElementById('shipments-period-filter');
+        const customRange = document.getElementById('custom-date-range');
+        const startInput = document.getElementById('shipments-start-date');
+        const endInput = document.getElementById('shipments-end-date');
+
+        if (periodSelect && customRange && startInput && endInput && !periodSelect.dataset.bound) {
+            periodSelect.addEventListener('change', () => {
+                const val = periodSelect.value;
+                customRange.classList.toggle('hidden', val !== 'custom');
+                renderCustomerShipmentsWithFilters();
+            });
+            const onDateChange = () => renderCustomerShipmentsWithFilters();
+            startInput.addEventListener('change', onDateChange);
+            endInput.addEventListener('change', onDateChange);
+            periodSelect.dataset.bound = 'true';
         }
-        
-        // KDV sütunlarını göster/gizle
-        const hasVat = shipments.some(shipment => shipment.calculateVat);
-        const vatColumns = document.querySelectorAll('.vat-column');
-        vatColumns.forEach(col => {
-            col.style.display = hasVat ? '' : 'none';
-        });
-        
-        // TL karşılığı sütununu göster/gizle
-        const hasTry = shipments.some(shipment => shipment.showTryInReceipt);
-        const tryColumns = document.querySelectorAll('.try-column');
-        tryColumns.forEach(col => {
-            col.style.display = hasTry ? '' : 'none';
-        });
-        
-        tbody.innerHTML = shipments.map(shipment => {
-            return shipment.lines?.map(line => `
-                <tr>
-                    <td>${DateUtils.formatDate(shipment.date)}</td>
-                    <td>${line.productName}</td>
-                    <td>${line.party}</td>
-                    <td>${NumberUtils.formatKg(line.kg)}</td>
-                    <td>${line.tops || 0}</td>
-                    <td>${NumberUtils.formatUnitPrice(line.unitUsd)}</td>
-                    <td>${NumberUtils.formatUSD(line.lineTotalUsd)}</td>
-                    ${shipment.calculateVat ? `<td>${NumberUtils.formatTRY(line.vatTry || 0)}</td>` : ''}
-                    ${shipment.showTryInReceipt ? `<td>${NumberUtils.formatTRY(line.lineTotalTry || 0)}</td>` : ''}
-                    <td>${NumberUtils.formatTRY(shipment.calculateVat ? (line.totalWithVatTry || line.lineTotalTry || 0) : (line.lineTotalTry || 0))}</td>
-                    <td>
-                        <button class="action-btn action-btn-view" onclick="printShipmentReceipt('${shipment.id}')">
-                            Makbuz
-                        </button>
-                    </td>
-                </tr>
-            `).join('') || `
-                <tr>
-                    <td>${DateUtils.formatDate(shipment.date)}</td>
-                    <td colspan="${(shipment.calculateVat ? 1 : 0) + (shipment.showTryInReceipt ? 1 : 0) + 6}">Sevk detayı bulunamadı</td>
-                    <td>
-                        <button class="action-btn action-btn-view" onclick="printShipmentReceipt('${shipment.id}')">
-                            Makbuz
-                        </button>
-                    </td>
-                </tr>
-            `;
-        }).join('');
-        
+
+        renderCustomerShipmentsWithFilters();
     } catch (error) {
         console.error('Customer shipments load error:', error);
         Toast.error('Sevk listesi yüklenirken hata oluştu');
     }
 }
 
+function renderCustomerShipmentsWithFilters() {
+    const tbody = document.getElementById('customer-shipments-table');
+    const list = Array.isArray(window.currentCustomerShipments) ? window.currentCustomerShipments : [];
+
+    // Filtreleri oku
+    const periodSelect = document.getElementById('shipments-period-filter');
+    const startInput = document.getElementById('shipments-start-date');
+    const endInput = document.getElementById('shipments-end-date');
+
+    let filtered = [...list];
+    if (periodSelect) {
+        const val = periodSelect.value;
+        if (val === 'custom' && startInput?.value && endInput?.value) {
+            const start = new Date(startInput.value);
+            const end = new Date(endInput.value);
+            end.setHours(23, 59, 59, 999);
+            filtered = filtered.filter(s => DateUtils.isInRange(s.date, start, end));
+        } else if (val !== 'all') {
+            const days = parseInt(val || '30', 10);
+            const cutoff = DateUtils.getDaysAgo(days);
+            filtered = filtered.filter(s => new Date(s.date) >= cutoff);
+        }
+    }
+
+    // Özet metrikleri (USD toplamı, KG ve ortalama fiyat) filtreye göre güncelle
+    let totalKg = 0;
+    let totalUsd = 0;
+    let weightedSum = 0;
+    filtered.forEach(shipment => {
+        shipment.lines?.forEach(line => {
+            const kg = NumberUtils.parseNumber(line.kg) || 0;
+            const unitUsd = NumberUtils.parseNumber(line.unitUsd) || 0;
+            const lineTotalUsd = NumberUtils.parseNumber(line.lineTotalUsd) || NumberUtils.round(kg * unitUsd, 2);
+            totalKg += kg;
+            totalUsd += lineTotalUsd;
+            weightedSum += kg * unitUsd;
+        });
+    });
+    const avgPrice = totalKg > 0 ? NumberUtils.round(weightedSum / totalKg, 4) : 0;
+    // Müşteri detay özet widget'ını güncelle
+    DOMUtils.setText('#customer-30d-kg', NumberUtils.formatKg(totalKg));
+    DOMUtils.setText('#customer-30d-usd', NumberUtils.formatUSD(totalUsd));
+    DOMUtils.setText('#customer-30d-avg', NumberUtils.formatUnitPrice(avgPrice) + '/kg');
+
+    if (filtered.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center">Sevk bulunamadı</td></tr>';
+        return;
+    }
+
+    // KDV sütunlarını göster/gizle
+    const hasVat = filtered.some(shipment => shipment.calculateVat);
+    const vatColumns = document.querySelectorAll('.vat-column');
+    vatColumns.forEach(col => {
+        col.style.display = hasVat ? '' : 'none';
+    });
+
+    // TL karşılığı sütununu göster/gizle
+    const hasTry = filtered.some(shipment => shipment.showTryInReceipt);
+    const tryColumns = document.querySelectorAll('.try-column');
+    tryColumns.forEach(col => {
+        col.style.display = hasTry ? '' : 'none';
+    });
+
+    filtered.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    tbody.innerHTML = filtered.map(shipment => {
+        return shipment.lines?.map(line => `
+            <tr>
+                <td>${DateUtils.formatDate(shipment.date)}</td>
+                <td>${line.productName}</td>
+                <td>${line.party}</td>
+                <td>${NumberUtils.formatKg(line.kg)}</td>
+                <td>${line.tops || 0}</td>
+                <td>${NumberUtils.formatUnitPrice(line.unitUsd)}</td>
+                <td>${NumberUtils.formatUSD(line.lineTotalUsd)}</td>
+                ${shipment.calculateVat ? `<td>${NumberUtils.formatTRY(line.vatTry || 0)}</td>` : ''}
+                ${shipment.showTryInReceipt ? `<td>${NumberUtils.formatTRY(line.lineTotalTry || 0)}</td>` : ''}
+                <td>${NumberUtils.formatTRY(shipment.calculateVat ? (line.totalWithVatTry || line.lineTotalTry || 0) : (line.lineTotalTry || 0))}</td>
+                <td>
+                    <button class="action-btn action-btn-view" onclick="printShipmentReceipt('${shipment.id}')">
+                        Makbuz
+                    </button>
+                </td>
+            </tr>
+        `).join('') || `
+            <tr>
+                <td>${DateUtils.formatDate(shipment.date)}</td>
+                <td colspan="${(shipment.calculateVat ? 1 : 0) + (shipment.showTryInReceipt ? 1 : 0) + 6}">Sevk detayı bulunamadı</td>
+                <td>
+                    <button class="action-btn action-btn-view" onclick="printShipmentReceipt('${shipment.id}')">
+                        Makbuz
+                    </button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
 async function loadCustomerPayments(customerId) {
     try {
-        const payments = await PaymentService.getByCustomerId(customerId);
         const tbody = document.getElementById('customer-payments-table');
+        if (tbody) {
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center">Yükleniyor...</td></tr>';
+        }
+        const requestedCustomerId = customerId;
+        const payments = await PaymentService.getByCustomerId(requestedCustomerId);
+        if (window.currentCustomerDetailId && window.currentCustomerDetailId !== requestedCustomerId) {
+            return; // farklı müşteriye geçilmiş, bu sonucu yansıtma
+        }
+        
+        const safeTbody = document.getElementById('customer-payments-table');
+        const tbodyRef = safeTbody || tbody;
         
         if (payments.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" class="text-center">Tahsilat bulunamadı</td></tr>';
+            if (tbodyRef) tbodyRef.innerHTML = '<tr><td colspan="6" class="text-center">Tahsilat bulunamadı</td></tr>';
             return;
         }
         
-        tbody.innerHTML = payments.map(payment => `
+        if (!tbodyRef) return;
+        tbodyRef.innerHTML = payments.map(payment => `
             <tr>
                 <td>${DateUtils.formatDate(payment.date)}</td>
                 <td>${NumberUtils.formatUSD(payment.amountUsd)}</td>
@@ -965,8 +1137,8 @@ async function loadInventoryPage() {
         finishedProductFilter.innerHTML = productOptions;
         }
         
-        // Setup search and filters
-        setupInventoryFilters(activeLots);
+        // Setup search and filters (tüm lotlar üzerinde çalışsın)
+        setupInventoryFilters(lots);
         
         // Setup tabs
         setupInventoryTabs();
@@ -979,6 +1151,115 @@ async function loadInventoryPage() {
         console.error('Inventory page load error:', error);
         Toast.error('Stok listesi yüklenirken hata oluştu');
     }
+}
+
+// Raw Stock Page
+async function loadRawStockPage() {
+    try {
+        const [lots, products, suppliers] = await Promise.all([
+            InventoryService.getAll(),
+            ProductService.getAll(),
+            SupplierService.getAll()
+        ]);
+
+        // Ham stok: rawFlag true olan ya da ürün kategorisi/etiketine göre işaretlenmiş lotlar
+        const rawLots = lots.filter(l => l.isRaw === true || l.tag === 'raw');
+
+        const tbody = document.getElementById('raw-stock-table-body');
+        if (!tbody) return;
+
+        if (rawLots.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center">Henüz ham stok yok</td></tr>';
+        } else {
+            const rows = rawLots
+                .sort((a,b) => new Date(b.date) - new Date(a.date))
+                .map(lot => {
+                    const supplierName = suppliers.find(s => s.id === lot.supplierId)?.name || '-';
+                    const pricePerKg = (lot.pricePerKg || lot.ormePricePerKg || 0);
+                    const totalUsd = pricePerKg > 0 ? NumberUtils.round(pricePerKg * (lot.totalKg || 0), 2) : 0;
+                    return `
+                        <tr>
+                            <td>${lot.productName || '-'}</td>
+                            <td>${lot.party || '-'}</td>
+                            <td>${NumberUtils.formatKg(lot.remainingKg || lot.totalKg || 0)}</td>
+                            <td>${pricePerKg > 0 ? NumberUtils.formatUnitPrice(pricePerKg) : '-'}</td>
+                            <td>${pricePerKg > 0 ? NumberUtils.formatUSD(totalUsd) : '-'}</td>
+                            <td>${DateUtils.formatDate(lot.date)}</td>
+                            <td>${supplierName}</td>
+                            <td>
+                                <div class="action-buttons">
+                                    <button class="action-btn action-btn-edit" onclick="editRawStock('${lot.id}')">Düzenle</button>
+                                    <button class="action-btn action-btn-delete" onclick="deleteLot('${lot.id}')">Sil</button>
+                                </div>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+
+            tbody.innerHTML = rows;
+        }
+
+        // Ürün filtresi doldur
+        const productFilter = document.getElementById('raw-stock-product-filter');
+        if (productFilter) {
+            const options = '<option value="">Tüm Ürünler</option>' + products.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+            productFilter.innerHTML = options;
+            productFilter.onchange = () => applyRawStockFilters();
+        }
+
+        const search = document.getElementById('raw-stock-search');
+        if (search) {
+            search.oninput = () => applyRawStockFilters();
+        }
+
+        window._rawLotsCache = rawLots;
+        applyRawStockFilters();
+
+        // USD cari özetini güncelle
+        const statement = await RawBalanceService.getStatement();
+        const balanceEl = document.getElementById('raw-usd-balance');
+        if (balanceEl) balanceEl.textContent = NumberUtils.formatUSD(statement.balance);
+
+    } catch (error) {
+        console.error('Ham stok sayfası yükleme hatası:', error);
+        Toast.error('Ham stok listesi yüklenemedi');
+    }
+}
+
+function applyRawStockFilters() {
+    const tbody = document.getElementById('raw-stock-table-body');
+    if (!tbody) return;
+    const q = (document.getElementById('raw-stock-search')?.value || '').toLowerCase().trim();
+    const productId = document.getElementById('raw-stock-product-filter')?.value || '';
+    const lots = (window._rawLotsCache || []).filter(l => {
+        const matchesQ = !q || (l.party || '').toLowerCase().includes(q) || (l.productName || '').toLowerCase().includes(q);
+        const matchesProduct = !productId || l.productId === productId;
+        return matchesQ && matchesProduct;
+    });
+    if (lots.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center">Eşleşen kayıt bulunamadı</td></tr>';
+        return;
+    }
+    tbody.innerHTML = lots.map(lot => {
+        const pricePerKg = (lot.pricePerKg || lot.ormePricePerKg || 0);
+        const totalUsd = pricePerKg > 0 ? NumberUtils.round(pricePerKg * (lot.totalKg || 0), 2) : 0;
+        return `
+        <tr>
+            <td>${lot.productName || '-'}</td>
+            <td>${lot.party || '-'}</td>
+            <td>${NumberUtils.formatKg(lot.remainingKg || lot.totalKg || 0)}</td>
+            <td>${pricePerKg > 0 ? NumberUtils.formatUnitPrice(pricePerKg) : '-'}</td>
+            <td>${pricePerKg > 0 ? NumberUtils.formatUSD(totalUsd) : '-'}</td>
+            <td>${DateUtils.formatDate(lot.date)}</td>
+            <td>${lot.supplierName || '-'}</td>
+            <td>
+                <div class="action-buttons">
+                    <button class="action-btn action-btn-edit" onclick="editRawStock('${lot.id}')">Düzenle</button>
+                    <button class="action-btn action-btn-delete" onclick="deleteLot('${lot.id}')">Sil</button>
+                </div>
+            </td>
+        </tr>`;
+    }).join('');
 }
 
 function renderInventoryTable(lots) {
@@ -1018,7 +1299,7 @@ function renderInventoryTable(lots) {
                 <td>${lot.location || '-'}</td>
                 <td>
                     ${NumberUtils.formatKg(lot.remainingKg)}
-                    <div class="sub-muted">Top: ${lot.remainingTops ?? lot.rolls ?? '-'}</div>
+                    <div class="sub-muted">Top: ${lot.avgKgPerRoll > 0 ? Math.floor(lot.remainingKg / lot.avgKgPerRoll) : (lot.remainingTops ?? lot.rolls ?? '-')}</div>
                 </td>
                 <td><span class="status-badge ${statusClass}">${lot.status}</span></td>
                 <td>${DateUtils.formatDate(lot.date)}</td>
@@ -1242,10 +1523,16 @@ function setupInventoryFilters(allLots) {
             filtered = filtered.filter(lot => lot.productId === selectedProduct);
         }
         
-        // Status filter
+        // Status filter (Bitti'yi varsayılan olarak dışla, sadece "Bitti" seçilince göster)
         const selectedStatus = statusFilter.value;
-        if (selectedStatus) {
-            filtered = filtered.filter(lot => lot.status === selectedStatus);
+        if (selectedStatus === 'Bitti') {
+            filtered = filtered.filter(lot => lot.status === 'Bitti');
+        } else {
+            // Varsayılan ve diğer tüm durumlarda Bitti'leri gösterme
+            filtered = filtered.filter(lot => lot.status !== 'Bitti');
+            if (selectedStatus) {
+                filtered = filtered.filter(lot => lot.status === selectedStatus);
+            }
         }
         
         renderInventoryTable(filtered);
@@ -1408,18 +1695,33 @@ async function setupShipmentsFilters() {
 
 async function loadShipments() {
     try {
-        const shipments = await ShipmentService.getAll();
-        const customers = await CustomerService.getAll();
+        const [shipments, customers, products] = await Promise.all([
+            ShipmentService.getAll(),
+            CustomerService.getAll(),
+            ProductService.getAll()
+        ]);
         
-        // Enrich shipments with customer names
+        // Enrich shipments with customer names and fabric info
         const enrichedShipments = shipments.map(shipment => {
             const customer = customers.find(c => c.id === shipment.customerId);
+            
+            // Get fabric names from shipment lines
+            const fabricNames = [...new Set(
+                shipment.lines?.map(line => {
+                    const product = products.find(p => p.id === line.productId);
+                    return product ? product.name : 'Bilinmeyen Kumaş';
+                }) || []
+            )];
+            
             return {
                 ...shipment,
-                customerName: customer ? customer.name : 'Bilinmeyen Müşteri'
+                customerName: customer ? customer.name : 'Bilinmeyen Müşteri',
+                fabricNames: fabricNames.join(', ') || '-'
             };
         });
         
+        // Store for filtering
+        window.allShipments = enrichedShipments;
         renderShipments(enrichedShipments);
         
     } catch (error) {
@@ -1432,7 +1734,7 @@ function renderShipments(shipments) {
     const tbody = document.getElementById('shipments-table-body');
     
     if (shipments.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" class="text-center">Sevk bulunamadı</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center">Sevk bulunamadı</td></tr>';
         return;
     }
     
@@ -1445,10 +1747,11 @@ function renderShipments(shipments) {
         const totalUsd = shipment.totals?.totalUsd || 0;
         
         return `
-            <tr>
+            <tr data-customer-id="${shipment.customerId}">
                 <td>#${shortId}</td>
                 <td>${DateUtils.formatDate(shipment.date)}</td>
                 <td>${shipment.customerName}</td>
+                <td class="fabric-names">${shipment.fabricNames}</td>
                 <td>${NumberUtils.formatKg(totalKg)}</td>
                 <td>${NumberUtils.formatUSD(totalUsd)}</td>
                 <td>${shipment.note || '-'}</td>
@@ -1474,42 +1777,36 @@ function renderShipments(shipments) {
 }
 
 function filterShipments() {
+    if (!window.allShipments) return;
+    
     const searchTerm = document.getElementById('shipments-search').value.toLowerCase();
     const customerFilter = document.getElementById('shipments-customer-filter').value;
     const periodFilter = document.getElementById('shipments-period-filter').value;
     
-    const rows = document.querySelectorAll('#shipments-table-body tr');
-    
-    rows.forEach(row => {
-        if (row.cells.length < 7) return; // Skip empty row
-        
-        const shipmentNo = row.cells[0].textContent.toLowerCase();
-        const date = row.cells[1].textContent;
-        const customerName = row.cells[2].textContent.toLowerCase();
-        const note = row.cells[5].textContent.toLowerCase();
-        
-        // Search filter
+    let filteredShipments = window.allShipments.filter(shipment => {
+        // Search filter - sevk no, müşteri, kumaş adı, not
         const matchesSearch = !searchTerm || 
-            shipmentNo.includes(searchTerm) ||
-            customerName.includes(searchTerm) ||
-            note.includes(searchTerm);
+            shipment.id.toLowerCase().includes(searchTerm) ||
+            shipment.customerName.toLowerCase().includes(searchTerm) ||
+            shipment.fabricNames.toLowerCase().includes(searchTerm) ||
+            (shipment.note && shipment.note.toLowerCase().includes(searchTerm));
         
         // Customer filter
-        const matchesCustomer = !customerFilter || 
-            row.cells[2].dataset?.customerId === customerFilter;
+        const matchesCustomer = !customerFilter || shipment.customerId === customerFilter;
         
         // Period filter
         let matchesPeriod = true;
         if (periodFilter !== 'all') {
-            const shipmentDate = DateUtils.parseDate(date);
+            const shipmentDate = new Date(shipment.date);
             const daysAgo = parseInt(periodFilter);
             const cutoffDate = DateUtils.getDaysAgo(daysAgo);
             matchesPeriod = shipmentDate >= cutoffDate;
         }
         
-        const shouldShow = matchesSearch && matchesCustomer && matchesPeriod;
-        row.style.display = shouldShow ? '' : 'none';
+        return matchesSearch && matchesCustomer && matchesPeriod;
     });
+    
+    renderShipments(filteredShipments);
 }
 
 async function viewShipmentDetails(shipmentId) {
@@ -1655,6 +1952,7 @@ async function loadSuppliersPage() {
         
         if (suppliers.length === 0) {
             tbody.innerHTML = '<tr><td colspan="7" class="text-center">Henüz tedarikçi eklenmemiş</td></tr>';
+            updateTotalSupplierDebt([]);
             return;
         }
         
@@ -1664,21 +1962,31 @@ async function loadSuppliersPage() {
             const totalPaid = await calculateSupplierPaid(supplier.id);
             const outstanding = totalDebt - totalPaid;
             
+            // Para birimi belirleme: iplik ve örme USD, boyahane TL
+            const isUSD = supplier.type === 'iplik' || supplier.type === 'orme';
+            
             return {
                 ...supplier,
                 totalDebt,
                 totalPaid,
-                outstanding
+                outstanding,
+                isUSD
             };
         }));
         
         tbody.innerHTML = suppliersWithDebt.map(supplier => {
             const typeNames = {
-            'iplik': 'İplikçi',
-            'orme': 'Örme',
-            'boyahane': 'Boyahane'
-        };
-        
+                'iplik': 'İplikçi',
+                'orme': 'Örme',
+                'boyahane': 'Boyahane'
+            };
+            
+            // Para birimine göre formatlama
+            const formatAmount = supplier.isUSD ? NumberUtils.formatUSD : NumberUtils.formatTRY;
+            const currencyBadge = supplier.isUSD 
+                ? '<span class="currency-badge usd">USD</span>' 
+                : '<span class="currency-badge try">TL</span>';
+            
             return `
                 <tr>
                     <td>
@@ -1687,23 +1995,23 @@ async function loadSuppliersPage() {
                         </a>
                     </td>
                     <td>${typeNames[supplier.type] || supplier.type}</td>
-                    <td>${supplier.contactInfo || '-'}</td>
-                    <td>${NumberUtils.formatTRY(supplier.totalDebt)}</td>
-                    <td>${NumberUtils.formatTRY(supplier.totalPaid)}</td>
+                    <td>${currencyBadge}</td>
+                    <td>${formatAmount(supplier.totalDebt)}</td>
+                    <td>${formatAmount(supplier.totalPaid)}</td>
                     <td class="${supplier.outstanding > 0 ? 'text-danger' : 'text-success'}">
-                        ${NumberUtils.formatTRY(supplier.outstanding)}
+                        ${formatAmount(supplier.outstanding)}
                     </td>
-                <td>
-                    <div class="action-buttons">
+                    <td>
+                        <div class="action-buttons">
                             <button class="action-btn action-btn-edit" onclick="showSupplierDetail('${supplier.id}')">
                                 Detay
                             </button>
                             <button class="action-btn action-btn-delete" onclick="deleteSupplier('${supplier.id}')">
                                 Sil
-                        </button>
-                    </div>
-                </td>
-            </tr>
+                            </button>
+                        </div>
+                    </td>
+                </tr>
             `;
         }).join('');
         
@@ -1749,18 +2057,28 @@ async function deleteSupplierPayment(paymentId) {
 // Tedarikçi detay sayfası
 async function showSupplierDetail(supplierId) {
     try {
+        // HEMEN window.currentSupplierId'yi set et (en başta)
+        window.currentSupplierId = supplierId;
+        
         // Hash ve sayfa aktivasyonu
         location.hash = '#supplier-detail';
         
         // localStorage'a supplier ID'yi kaydet
         localStorage.setItem('currentSupplierId', supplierId);
         console.log('💾 Supplier ID localStorage\'a kaydedildi:', supplierId);
+        console.log('✅ window.currentSupplierId set edildi:', window.currentSupplierId);
         
         const supplier = await SupplierService.getById(supplierId);
         if (!supplier) {
             Toast.error('Tedarikçi bulunamadı');
             return;
         }
+        
+        // Tedarikçi tipini normalize et ve kaydet (case-insensitive karşılaştırma için)
+        const supplierType = (supplier.type || '').toLowerCase().trim();
+        window.currentSupplierType = supplierType;
+        console.log('📝 Tedarikçi tipi (orijinal):', supplier.type);
+        console.log('📝 Tedarikçi tipi (normalize):', supplierType);
         
         // Sayfa değiştir ve navigation'ı güncelle
         document.querySelectorAll('.page').forEach(page => {
@@ -1777,21 +2095,71 @@ async function showSupplierDetail(supplierId) {
         document.getElementById('supplier-detail-type').textContent = getSupplierTypeName(supplier.type);
         document.getElementById('supplier-detail-contact').textContent = supplier.contactInfo || '-';
         
-        // Açılış ayarlarını yükle
+        // === BUTONLARI GÜNCELLE ===
+        console.log('🔧 Butonlar güncelleniyor, tip:', supplierType);
+        
+        // İplik girişi butonunu göster (sadece iplik tedarikçileri için)
+        const yarnShipmentBtn = document.getElementById('btn-yarn-shipment');
+        if (yarnShipmentBtn) {
+            const showYarn = supplierType === 'iplik';
+            yarnShipmentBtn.style.display = showYarn ? 'inline-flex' : 'none';
+            console.log('🧵 İplik Girişi butonu:', showYarn ? 'GÖRÜNÜR' : 'GİZLİ');
+        } else {
+            console.warn('⚠️ btn-yarn-shipment bulunamadı');
+        }
+        
+        // Ham kumaş gönder butonunu göster (sadece örme tedarikçileri için)
+        const rawMaterialBtn = document.getElementById('btn-raw-material-shipment');
+        if (rawMaterialBtn) {
+            const showRaw = supplierType === 'orme';
+            rawMaterialBtn.style.display = showRaw ? 'inline-flex' : 'none';
+            console.log('📦 Ham Kumaş butonu:', showRaw ? 'GÖRÜNÜR' : 'GİZLİ');
+        }
+        
+        // Fiyat listesi butonlarını göster/gizle
+        const supplierPriceListBtn = document.getElementById('btn-supplier-price-list');
+        const yarnPriceListBtn = document.getElementById('btn-yarn-price-list');
+        if (supplierPriceListBtn) {
+            const hideNormalPrice = supplierType === 'iplik';
+            supplierPriceListBtn.style.display = hideNormalPrice ? 'none' : 'inline-flex';
+            console.log('💰 Normal Fiyat Listesi:', hideNormalPrice ? 'GİZLİ' : 'GÖRÜNÜR');
+        }
+        if (yarnPriceListBtn) {
+            const showYarnPrice = supplierType === 'iplik';
+            yarnPriceListBtn.style.display = showYarnPrice ? 'inline-flex' : 'none';
+            console.log('💰 İplik Fiyat Listesi:', showYarnPrice ? 'GÖRÜNÜR' : 'GİZLİ');
+        } else {
+            console.warn('⚠️ btn-yarn-price-list bulunamadı');
+        }
+        
+        // İplik Türleri butonu (sadece iplik tedarikçileri için)
+        const yarnTypesBtn = document.getElementById('btn-yarn-types');
+        if (yarnTypesBtn) {
+            const showYarnTypes = supplierType === 'iplik';
+            yarnTypesBtn.style.display = showYarnTypes ? 'inline-flex' : 'none';
+            console.log('🧶 İplik Türleri butonu:', showYarnTypes ? 'GÖRÜNÜR' : 'GİZLİ');
+        }
+        
+        // Açılış ayarlarını yükle (Örme, İplik tedarikçileri ve ENSA USD, diğerleri TL)
+        const ENSA_ID = 'vMtmBGwmTq0rRsjhHUEm';
+        const isUSD = supplierType === 'orme' || supplierType === 'iplik' || supplier.id === ENSA_ID;
         const opening = {
-            balance: supplier.openingBalanceTRY || 0,
+            balance: isUSD ? (supplier.openingBalanceUSD || 0) : (supplier.openingBalanceTRY || 0),
             startDate: supplier.accrualStartDate || DateUtils.getInputDate()
         };
         const openingInput = document.getElementById('supplier-opening-balance');
         const startInput = document.getElementById('supplier-accrual-start');
         if (openingInput) openingInput.value = opening.balance || '';
         if (startInput) startInput.value = opening.startDate || DateUtils.getInputDate();
+        // Etiket metni
+        // Açılış bakiyesi etiketini güvenle güncelle
+        const labelEl = document.getElementById('supplier-opening-balance-label');
+        if (labelEl) {
+            labelEl.textContent = `Açılış Bakiyesi (${isUSD ? 'USD' : 'TL'}):`;
+        }
 
         // Ekstre yükle
         await loadSupplierExtract(supplierId);
-        
-        // Global değişken
-        window.currentSupplierId = supplierId;
         
     } catch (error) {
         console.error('Supplier detail error:', error);
@@ -1828,9 +2196,24 @@ async function loadSupplierExtract(supplierId) {
         // Ödemeleri filtrele (başlangıç tarihinden itibaren)
         const supplierPayments = payments.filter(p => (p.supplierId === supplierId || !p.supplierId) && new Date(p.date) >= startDate);
         
+        // İplik girişlerini al (iplik tedarikçileri için)
+        let yarnShipments = [];
+        if (supplier.type === 'iplik') {
+            yarnShipments = await db.readAll('yarnShipments');
+            yarnShipments = yarnShipments.filter(ys => {
+                if (ys.supplierId !== supplierId) return false;
+                if (!ys.date) return false;
+                const ysDate = new Date(ys.date);
+                ysDate.setHours(0,0,0,0);
+                return ysDate >= startDate;
+            });
+        }
+        
         // Ekstre oluştur
+        const ENSA_ID = 'vMtmBGwmTq0rRsjhHUEm';
+        const isUSD = supplierId === ENSA_ID || supplier.type === 'orme' || supplier.type === 'iplik'; // Örme ve İplik tedarikçileri USD
         const extract = [];
-        let runningBalance = NumberUtils.parseNumber(supplier?.openingBalanceTRY) || 0;
+        let runningBalance = NumberUtils.parseNumber(isUSD ? (supplier?.openingBalanceUSD) : (supplier?.openingBalanceTRY)) || 0;
         if (runningBalance > 0) {
             extract.push({
                 date: supplier.accrualStartDate || DateUtils.getInputDate(),
@@ -1842,6 +2225,22 @@ async function loadSupplierExtract(supplierId) {
                 payment: 0,
                 balance: runningBalance,
                 type: 'opening'
+            });
+        }
+        
+        // İplik girişlerini ekstreye ekle (iplik tedarikçileri için)
+        for (const shipment of yarnShipments) {
+            runningBalance += shipment.totalCost || 0;
+            extract.push({
+                date: shipment.date,
+                description: `İplik girişi - ${shipment.yarnTypeName || ''}`,
+                product: shipment.yarnTypeName || '-',
+                kg: shipment.kg || 0,
+                unitPrice: shipment.pricePerKg || 0,
+                debt: shipment.totalCost || 0,
+                payment: 0,
+                balance: runningBalance,
+                type: 'yarnShipment'
             });
         }
         
@@ -1888,8 +2287,19 @@ async function loadSupplierExtract(supplierId) {
         }
         
         for (const payment of supplierPayments) {
-            // TL ödemeler için TL değerini, USD ödemeler için USD değerini kullan
-            const paymentAmount = payment.originalCurrency === 'TRY' ? (payment.originalAmount || 0) : (payment.amount || 0);
+            // Ensa USD: TRY ödemeleri USD'ye çevir
+            let paymentAmount;
+            if (isUSD) {
+                if (payment.originalCurrency === 'TRY') {
+                    const rate = payment.exchangeRate || window.currentExchangeRate || 30.50;
+                    paymentAmount = NumberUtils.round((payment.originalAmount || 0) / rate, 2);
+                } else {
+                    paymentAmount = payment.amount || 0;
+                }
+            } else {
+                // Diğerleri TL
+                paymentAmount = payment.originalCurrency === 'TRY' ? (payment.originalAmount || 0) : (payment.amount || 0);
+            }
             runningBalance -= paymentAmount;
             
             extract.push({
@@ -1915,11 +2325,11 @@ async function loadSupplierExtract(supplierId) {
                 <td>${item.description}</td>
                 <td>${item.product}</td>
                 <td>${item.kg > 0 ? NumberUtils.formatKg(item.kg) : '-'}</td>
-                <td>${item.unitPrice > 0 ? NumberUtils.formatTRY(item.unitPrice) : '-'}</td>
-                <td class="text-danger">${item.debt > 0 ? NumberUtils.formatTRY(item.debt) : '-'}</td>
-                <td class="text-success">${item.payment > 0 ? NumberUtils.formatTRY(item.payment) : '-'}</td>
+                <td>${item.unitPrice > 0 ? (isUSD ? NumberUtils.formatUnitPrice(item.unitPrice) : NumberUtils.formatTRY(item.unitPrice)) : '-'}</td>
+                <td class="text-danger">${item.debt > 0 ? (isUSD ? NumberUtils.formatUSD(item.debt) : NumberUtils.formatTRY(item.debt)) : '-'}</td>
+                <td class="text-success">${item.payment > 0 ? (isUSD ? NumberUtils.formatUSD(item.payment) : NumberUtils.formatTRY(item.payment)) : '-'}</td>
                 <td class="${item.balance >= 0 ? 'text-danger' : 'text-success'}">
-                    ${NumberUtils.formatTRY(Math.abs(item.balance))}
+                    ${isUSD ? NumberUtils.formatUSD(Math.abs(item.balance)) : NumberUtils.formatTRY(Math.abs(item.balance))}
                 </td>
                 <td>
                     ${item.type === 'payment' ? `<button class="action-btn action-btn-print" onclick="fastPrintSupplierPaymentReceipt('${item.paymentId||''}')">Makbuz</button>` : '-'}
@@ -1931,9 +2341,9 @@ async function loadSupplierExtract(supplierId) {
         const totalPaid = extract.reduce((sum, item) => sum + item.payment, 0);
         const outstanding = totalDebt - totalPaid;
         
-        document.getElementById('supplier-detail-total-debt').textContent = NumberUtils.formatTRY(totalDebt);
-        document.getElementById('supplier-detail-paid').textContent = NumberUtils.formatTRY(totalPaid);
-        document.getElementById('supplier-detail-outstanding').textContent = NumberUtils.formatTRY(outstanding);
+        document.getElementById('supplier-detail-total-debt').textContent = isUSD ? NumberUtils.formatUSD(totalDebt) : NumberUtils.formatTRY(totalDebt);
+        document.getElementById('supplier-detail-paid').textContent = isUSD ? NumberUtils.formatUSD(totalPaid) : NumberUtils.formatTRY(totalPaid);
+        document.getElementById('supplier-detail-outstanding').textContent = isUSD ? NumberUtils.formatUSD(outstanding) : NumberUtils.formatTRY(outstanding);
         
     } catch (error) {
         console.error('Supplier extract error:', error);
@@ -1944,42 +2354,67 @@ async function loadSupplierExtract(supplierId) {
 // Tedarikçi borç hesapla
 async function calculateSupplierDebt(supplierId) {
     try {
-        const [lots, priceList, supplier, productionCosts] = await Promise.all([
+        const [lots, priceList, supplier, productionCosts, yarnShipments] = await Promise.all([
             InventoryService.getAll(),
             SupplierService.getPriceListBySupplier(supplierId),
             SupplierService.getById(supplierId),
-            ProductionCostService.getAll()
+            ProductionCostService.getAll(),
+            db.readAll('yarnShipments').catch(() => [])
         ]);
         
         const startDate = supplier?.accrualStartDate ? new Date(supplier.accrualStartDate) : new Date(DateUtils.getInputDate());
         startDate.setHours(0,0,0,0);
         
-        // Bu tedarikçiye ait lotları filtrele ve tarihten sonrakileri al
-        const supplierLots = lots.filter(lot => {
-            if (!lot.date) return false;
-            const lotDate = new Date(lot.date);
-            lotDate.setHours(0,0,0,0);
-            if (lotDate < startDate) return false;
-            
-            if (lot.supplierId === supplierId) return true;
-            const hasPrice = priceList.find(p => p.productId === lot.productId);
-            return hasPrice;
-        });
+        // Tedarikçi tipi - USD mi TL mi?
+        const isUSD = supplier?.type === 'iplik' || supplier?.type === 'orme';
         
-        let totalDebt = NumberUtils.parseNumber(supplier?.openingBalanceTRY) || 0;
+        // Açılış bakiyesi - tedarikçi tipine göre
+        let totalDebt = isUSD 
+            ? (NumberUtils.parseNumber(supplier?.openingBalanceUSD) || 0)
+            : (NumberUtils.parseNumber(supplier?.openingBalanceTRY) || 0);
         
-        for (const lot of supplierLots) {
-            // Önce productionCosts'tan o günkü fiyat bilgisini al
-            const productionCost = productionCosts.find(pc => pc.lotId === lot.id && pc.supplierId === supplierId);
+        // İplik tedarikçileri için iplik girişlerini hesapla
+        if (supplier?.type === 'iplik') {
+            const supplierYarnShipments = (yarnShipments || []).filter(ys => {
+                if (ys.supplierId !== supplierId) return false;
+                if (!ys.date) return false;
+                const shipmentDate = new Date(ys.date);
+                shipmentDate.setHours(0,0,0,0);
+                return shipmentDate >= startDate;
+            });
             
-            if (productionCost && productionCost.pricePerKg) {
-                // O günkü fiyat bilgisini kullan
-                totalDebt += (lot.totalKg || 0) * (productionCost.pricePerKg || 0);
-            } else {
-                // Eski sistem - güncel fiyat listesini kullan (geriye uyumluluk)
-                const price = priceList.find(p => p.productId === lot.productId);
-                if (price) {
-                    totalDebt += (lot.totalKg || 0) * (price.pricePerKg || 0);
+            for (const shipment of supplierYarnShipments) {
+                totalDebt += shipment.totalCost || 0;
+            }
+        }
+        
+        // Örme ve Boyahane için lot bazlı hesaplama
+        if (supplier?.type === 'orme' || supplier?.type === 'boyahane') {
+            // Bu tedarikçiye ait lotları filtrele ve tarihten sonrakileri al
+            const supplierLots = lots.filter(lot => {
+                if (!lot.date) return false;
+                const lotDate = new Date(lot.date);
+                lotDate.setHours(0,0,0,0);
+                if (lotDate < startDate) return false;
+                
+                if (lot.supplierId === supplierId) return true;
+                const hasPrice = priceList.find(p => p.productId === lot.productId);
+                return hasPrice;
+            });
+            
+            for (const lot of supplierLots) {
+                // Önce productionCosts'tan o günkü fiyat bilgisini al
+                const productionCost = productionCosts.find(pc => pc.lotId === lot.id && pc.supplierId === supplierId);
+                
+                if (productionCost && productionCost.pricePerKg) {
+                    // O günkü fiyat bilgisini kullan
+                    totalDebt += (lot.totalKg || 0) * (productionCost.pricePerKg || 0);
+                } else {
+                    // Eski sistem - güncel fiyat listesini kullan (geriye uyumluluk)
+                    const price = priceList.find(p => p.productId === lot.productId);
+                    if (price) {
+                        totalDebt += (lot.totalKg || 0) * (price.pricePerKg || 0);
+                    }
                 }
             }
         }
@@ -2021,8 +2456,25 @@ async function calculateSupplierPaid(supplierId) {
 
 // Toplam tedarikçi borcu güncelle
 function updateTotalSupplierDebt(suppliers) {
-    const totalDebt = suppliers.reduce((sum, s) => sum + s.totalDebt, 0);
-    document.getElementById('total-supplier-debt').textContent = NumberUtils.formatTRY(totalDebt);
+    // USD borçlar (iplik + örme)
+    const usdSuppliers = suppliers.filter(s => s.isUSD);
+    const totalUsdDebt = usdSuppliers.reduce((sum, s) => sum + (s.outstanding || 0), 0);
+    
+    // TL borçlar (boyahane)
+    const trySuppliers = suppliers.filter(s => !s.isUSD);
+    const totalTryDebt = trySuppliers.reduce((sum, s) => sum + (s.outstanding || 0), 0);
+    
+    // USD kartını güncelle
+    const usdElement = document.getElementById('total-usd-debt');
+    if (usdElement) {
+        usdElement.textContent = NumberUtils.formatUSD(totalUsdDebt);
+    }
+    
+    // TL kartını güncelle
+    const tryElement = document.getElementById('total-try-debt');
+    if (tryElement) {
+        tryElement.textContent = NumberUtils.formatTRY(totalTryDebt);
+    }
 }
 
 // Tedarikçi türü adını al
@@ -2966,6 +3418,8 @@ window.showSupplierDetail = showSupplierDetail;
 window.editProductionCost = editProductionCost;
 window.deleteSupplierPayment = deleteSupplierPayment;
 window.closeModal = closeModal;
+window.dismissStockAlerts = dismissStockAlerts;
+window.loadRawStockPage = loadRawStockPage;
 
 // Açılış bakiyelerini manuel olarak ekle
 async function setOpeningBalances() {
@@ -3528,6 +3982,26 @@ async function saveSupplierOpeningSettings() {
 }
 
 window.saveSupplierOpeningSettings = saveSupplierOpeningSettings;
+
+// İplik çeşidi ekle (konsoldan kullanım için)
+async function addYarnTypeFromConsole(name, code = '') {
+    try {
+        const yarnType = await YarnTypeService.create({
+            name: name,
+            code: code,
+            note: ''
+        });
+        console.log('✅ İplik çeşidi eklendi:', yarnType);
+        Toast.success(`İplik çeşidi eklendi: ${name}`);
+        return yarnType;
+    } catch (error) {
+        console.error('İplik çeşidi ekleme hatası:', error);
+        Toast.error(error.message || 'İplik çeşidi eklenemedi');
+        throw error;
+    }
+}
+
+window.addYarnTypeFromConsole = addYarnTypeFromConsole;
 
 // Hızlı tedarikçi ödeme makbuzu yazdırma
 async function fastPrintSupplierPaymentReceipt(paymentId) {

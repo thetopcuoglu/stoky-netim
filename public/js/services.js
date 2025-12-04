@@ -150,10 +150,36 @@ class CustomerService {
         const entries = [];
 
         shipments.forEach(shipment => {
+            // Kumaş detaylarını oluştur
+            let fabricDetails = '';
+            if (shipment.lines && shipment.lines.length > 0) {
+                // Kumaş bazında toplam kg hesapla
+                const fabricTotals = {};
+                shipment.lines.forEach(line => {
+                    const productName = line.productName || 'Bilinmeyen Kumaş';
+                    const kg = line.kg || 0;
+                    if (fabricTotals[productName]) {
+                        fabricTotals[productName] += kg;
+                    } else {
+                        fabricTotals[productName] = kg;
+                    }
+                });
+                
+                // Kumaş detaylarını formatla
+                const fabricList = Object.entries(fabricTotals)
+                    .map(([name, kg]) => `${name}: ${NumberUtils.formatKg(kg)}`)
+                    .join(', ');
+                
+                const totalKg = Object.values(fabricTotals).reduce((sum, kg) => sum + kg, 0);
+                fabricDetails = `${fabricList} (Toplam: ${NumberUtils.formatKg(totalKg)})`;
+            } else {
+                fabricDetails = 'Detay yok';
+            }
+            
             entries.push({
                 date: shipment.date,
                 type: 'shipment',
-                description: `Sevk #${shipment.id.substr(-6)}`,
+                description: fabricDetails,
                 debit: shipment.totals?.totalUsd || 0,
                 credit: 0,
                 reference: shipment
@@ -270,11 +296,18 @@ class InventoryService {
                 const shipped = shippedTopsByLot.get(lot.id) || 0;
                 remainingTops = Math.max(0, totalTops - shipped);
             }
+            
+            // Calculate dynamic tops based on remaining kg and average kg per roll
+            let calculatedRemainingTops = remainingTops;
+            if (lot.avgKgPerRoll > 0 && lot.remainingKg > 0) {
+                calculatedRemainingTops = Math.floor(lot.remainingKg / lot.avgKgPerRoll);
+            }
+            
             return {
                 ...lot,
                 productName,
                 totalTops,
-                remainingTops
+                remainingTops: calculatedRemainingTops
             };
         });
     }
@@ -287,14 +320,21 @@ class InventoryService {
         return await db.queryByIndex('inventoryLots', 'productId', productId);
     }
 
+    // Parti numarasına göre lot bul (case-insensitive, trim)
+    static async getByParty(party) {
+        const allLots = await db.readAll('inventoryLots');
+        const norm = (v) => (v || '').toString().trim().toLowerCase();
+        const key = norm(party);
+        return allLots.filter(l => norm(l.party) === key);
+    }
+
     static async create(lotData) {
         const errors = this.validate(lotData);
         if (errors.length > 0) {
             throw new Error(errors.join(', '));
         }
 
-        // Calculate derived fields
-        lotData.totalKg = NumberUtils.round(lotData.rolls * lotData.avgKgPerRoll, 2);
+        // Calculate derived fields - totalKg now comes from form
         lotData.remainingKg = lotData.totalKg;
         // Top takibi
         lotData.totalTops = NumberUtils.parseNumber(lotData.rolls);
@@ -304,31 +344,29 @@ class InventoryService {
         const lot = await db.create('inventoryLots', lotData);
 
         // Otomatik boyahane maliyeti hesapla ve kaydet
-        try {
-            const boyahaneCost = await SupplierService.calculateBoyahaneCost(lot.id, lotData.productId, lotData.totalKg);
-            
-            if (boyahaneCost > 0) {
-                // Production cost kaydı oluştur
-                const costData = {
-                    lotId: lot.id,
-                    productId: lotData.productId,
-                    iplikCost: 0,
-                    ormeCost: 0,
-                    boyahaneCost: boyahaneCost,
-                    totalCost: boyahaneCost,
-                    paidAmount: 0,
-                    status: 'pending',
-                    // O günkü fiyat bilgisini sakla
-                    pricePerKg: pricePerKg,
-                    exchangeRate: currentExchangeRate,
-                    supplierId: activeBoyahane?.id
-                };
-                
-                await ProductionCostService.create(costData);
-                console.log(`✅ Otomatik boyahane maliyeti kaydedildi: ${NumberUtils.formatUSD(boyahaneCost)}`);
+        if (!lotData.isRaw) {
+            try {
+                const boyahaneCost = await SupplierService.calculateBoyahaneCost(lot.id, lotData.productId, lotData.totalKg);
+                if (boyahaneCost > 0) {
+                    // Production cost kaydı oluştur (tanımsız değişkenleri kullanma)
+                    const costData = {
+                        lotId: lot.id,
+                        productId: lotData.productId,
+                        iplikCost: 0,
+                        ormeCost: 0,
+                        boyahaneCost: boyahaneCost,
+                        totalCost: boyahaneCost,
+                        paidAmount: 0,
+                        status: 'pending'
+                    };
+                    await ProductionCostService.create(costData);
+                    console.log(`✅ Otomatik boyahane maliyeti kaydedildi: ${NumberUtils.formatUSD(boyahaneCost)}`);
+                }
+            } catch (error) {
+                console.error('Otomatik boyahane maliyeti hesaplama hatası:', error);
             }
-        } catch (error) {
-            console.error('Otomatik boyahane maliyeti hesaplama hatası:', error);
+        } else {
+            console.log('ℹ️ Ham stok girişi (isRaw=true): Boyahane bakiyesine maliyet yazılmadı.');
         }
 
         // Clear dashboard cache
@@ -394,7 +432,18 @@ class InventoryService {
             throw new Error('Bu parti sevk kayıtlarında kullanıldığı için silinemez.');
         }
 
+        // lot'u silmeden önce kaydı oku (isRaw kontrolü için)
+        const lotBeforeDelete = await this.getById(id).catch(() => null);
         const lot = await db.delete('inventoryLots', id);
+
+        // Ham stok ise ham cari hareketlerini de sil
+        try {
+            if (lotBeforeDelete?.isRaw) {
+                await RawBalanceService.removeByLotId(id);
+            }
+        } catch (e) {
+            console.warn('Ham cari kaskad silme hatası:', e);
+        }
 
         // Clear dashboard cache
         if (typeof DashboardCache !== 'undefined') {
@@ -415,6 +464,9 @@ class InventoryService {
 
         const rollsError = Validation.number(lotData.rolls, 'Rulo sayısı', 0);
         if (rollsError) errors.push(rollsError);
+
+        const totalKgError = Validation.number(lotData.totalKg, 'Toplam kg', 0);
+        if (totalKgError) errors.push(totalKgError);
 
         const avgKgError = Validation.number(lotData.avgKgPerRoll, 'Ortalama kg/rulo', 0);
         if (avgKgError) errors.push(avgKgError);
@@ -992,10 +1044,21 @@ class SupplierService {
         return await db.update('suppliers', supplierData);
     }
 
-    static async setOpeningSettings(supplierId, openingBalanceTRY, accrualStartDateISO) {
+    static async setOpeningSettings(supplierId, openingBalance, accrualStartDateISO) {
         const supplier = await this.getById(supplierId);
         if (!supplier) throw new Error('Tedarikçi bulunamadı');
-        supplier.openingBalanceTRY = NumberUtils.parseNumber(openingBalanceTRY);
+        
+        // Örme, İplik tedarikçileri ve ENSA için USD, diğerleri için TL
+        const isUSD = supplier.type === 'orme' || supplier.type === 'iplik' || supplierId === 'vMtmBGwmTq0rRsjhHUEm';
+        
+        if (isUSD) {
+            supplier.openingBalanceUSD = NumberUtils.parseNumber(openingBalance);
+            supplier.openingBalanceTRY = 0; // USD kullanılıyorsa TRY'yi sıfırla
+        } else {
+            supplier.openingBalanceTRY = NumberUtils.parseNumber(openingBalance);
+            supplier.openingBalanceUSD = 0; // TRY kullanılıyorsa USD'yi sıfırla
+        }
+        
         supplier.accrualStartDate = accrualStartDateISO;
         supplier.updatedAt = new Date().toISOString();
         return await db.update('suppliers', supplier);
@@ -1121,6 +1184,12 @@ class SupplierService {
         const priceList = await db.readAll('supplierPriceLists');
         return priceList.filter(p => p.supplierId === supplierId);
     }
+    
+    // Get yarn type price list by supplier ID (for iplik suppliers)
+    static async getYarnTypePriceListBySupplier(supplierId) {
+        const priceList = await db.readAll('supplierPriceLists');
+        return priceList.filter(p => p.supplierId === supplierId && p.yarnTypeId);
+    }
 
     // Get price for specific product and supplier
     static async getProductPrice(supplierType, productId) {
@@ -1187,6 +1256,13 @@ class SupplierService {
     // Calculate boyahane cost for a lot based on product price
     static async calculateBoyahaneCost(lotId, productId, totalKg) {
         try {
+            // Ham lotlarda boyahane maliyeti hesaplanmaz
+            const lot = await InventoryService.getById(lotId);
+            if (lot?.isRaw) {
+                console.log('ℹ️ Ham stok (isRaw=true): calculateBoyahaneCost atlandı.');
+                return 0;
+            }
+
             const activeBoyahane = await this.getActiveBoyahane();
             if (!activeBoyahane) {
                 console.warn('Aktif boyahane bulunamadı');
@@ -1288,11 +1364,14 @@ class ProductionCostService {
     static validate(costData) {
         const errors = [];
 
-        const lotIdError = Validation.required(costData.lotId, 'Parti');
-        if (lotIdError) errors.push(lotIdError);
+        // İplik girişleri için lotId ve productId zorunlu değil (yarnShipmentId varsa)
+        if (!costData.yarnShipmentId) {
+            const lotIdError = Validation.required(costData.lotId, 'Parti');
+            if (lotIdError) errors.push(lotIdError);
 
-        const productIdError = Validation.required(costData.productId, 'Ürün');
-        if (productIdError) errors.push(productIdError);
+            const productIdError = Validation.required(costData.productId, 'Ürün');
+            if (productIdError) errors.push(productIdError);
+        }
 
         const iplikError = Validation.number(costData.iplikCost, 'İplik maliyeti', 0);
         if (iplikError) errors.push(iplikError);
@@ -1356,6 +1435,94 @@ class ProductionCostService {
     }
 }
 
+/**
+ * Yarn Type Service (İplik Çeşitleri)
+ */
+class YarnTypeService {
+    static async getAll() {
+        return await db.readAll('yarnTypes');
+    }
+
+    static async getById(id) {
+        return await db.read('yarnTypes', id);
+    }
+
+    static async create(yarnTypeData) {
+        if (!yarnTypeData.name) {
+            throw new Error('İplik çeşidi adı zorunludur');
+        }
+        return await db.create('yarnTypes', yarnTypeData);
+    }
+
+    static async update(yarnTypeData) {
+        if (!yarnTypeData.name) {
+            throw new Error('İplik çeşidi adı zorunludur');
+        }
+        return await db.update('yarnTypes', yarnTypeData);
+    }
+
+    static async delete(id) {
+        // İplik girişleri kontrolü
+        const shipments = await db.queryByIndex('yarnShipments', 'yarnTypeId', id);
+        if (shipments.length > 0) {
+            throw new Error('Bu iplik çeşidine ait giriş kayıtları bulunduğu için silinemez.');
+        }
+        return await db.delete('yarnTypes', id);
+    }
+}
+
+// Raw Balance (USD) Service - public
+class RawBalanceService {
+    static async getAll() {
+        return await db.readAll('rawBalances');
+    }
+    static async addOpeningBalance(amountUsd, date) {
+        const entry = { type: 'opening', description: 'Açılış Bakiyesi', amountUsd: NumberUtils.round(NumberUtils.parseNumber(amountUsd), 2), date: date || DateUtils.getInputDate() };
+        return await db.create('rawBalances', entry);
+    }
+    static async addDebt({ lotId, party, kg, pricePerKg, date }) {
+        const entry = { type: 'debt', description: `Ham stok girişi - ${party || ''}`.trim(), lotId, kg: NumberUtils.parseNumber(kg), pricePerKg: NumberUtils.parseNumber(pricePerKg), amountUsd: NumberUtils.round(NumberUtils.parseNumber(kg) * NumberUtils.parseNumber(pricePerKg), 2), date: date || DateUtils.getInputDate() };
+        return await db.create('rawBalances', entry);
+    }
+    static async addPayment({ amountUsd, method, note, date }) {
+        const entry = { type: 'payment', description: `USD Ödeme${method ? ' - ' + method : ''}`, amountUsd: NumberUtils.round(NumberUtils.parseNumber(amountUsd), 2), method: method || '', note: note || '', date: date || DateUtils.getInputDate() };
+        return await db.create('rawBalances', entry);
+    }
+    static async getStatement() {
+        const entries = await this.getAll();
+        entries.sort((a, b) => new Date(a.date) - new Date(b.date));
+        let balance = 0;
+        const rows = entries.map(e => {
+            if (e.type === 'opening' || e.type === 'debt') balance += e.amountUsd;
+            if (e.type === 'payment') balance -= e.amountUsd;
+            return { ...e, runningBalance: NumberUtils.round(balance, 2) };
+        });
+        return { rows, balance: NumberUtils.round(balance, 2) };
+    }
+
+    // Lot'a bağlı ham USD cari hareketlerini sil
+    static async removeByLotId(lotId) {
+        try {
+            if (!lotId) return 0;
+            const all = await db.readAll('rawBalances');
+            const items = all.filter(e => e.lotId === lotId);
+            let removed = 0;
+            for (const it of items) {
+                try {
+                    await db.delete('rawBalances', it.id || it);
+                    removed++;
+                } catch (e) {
+                    console.warn('rawBalances delete failed:', it, e);
+                }
+            }
+            console.log(`🗑️ Ham cari temizlendi: lotId=${lotId}, silinen=${removed}`);
+            return removed;
+        } catch (e) {
+            console.warn('removeByLotId error:', e);
+            return 0;
+        }
+    }
+}
 /**
  * Dashboard Service
  */
@@ -1454,6 +1621,83 @@ class DashboardService {
             console.error('Recent activities error:', error);
             return [];
         }
+    }
+}
+
+/**
+ * Stock Alert Service
+ */
+class StockAlertService {
+    // Kritik stok seviyesi kontrolü
+    static async getLowStockAlerts() {
+        try {
+            const products = await ProductService.getAll();
+            const lots = await InventoryService.getAll();
+            
+            // Normalize helper (TR -> ASCII, trim, lower)
+            const normalize = (v) => (v || '')
+                .toString()
+                .toLowerCase()
+                .trim()
+                .replace(/ğ/g, 'g')
+                .replace(/ü/g, 'u')
+                .replace(/ş/g, 's')
+                .replace(/ı/g, 'i')
+                .replace(/ö/g, 'o')
+                .replace(/ç/g, 'c');
+            
+            // Kritik stok seviyesi: 500kg altı
+            const CRITICAL_THRESHOLD = 500;
+            
+            // İzlenecek kumaş türleri (geniş anahtar kelimeler)
+            const WATCHED_KEYWORDS = [
+                'kappa',
+                'jarse',
+                'lyc mens', 'lyc mensh', 'lyc mens', 'lyc mensj', 'lyc menş', 'lyc mensh', 'lyc mensi', 'lyc menş', // çeşitli yazımlar için esnek liste
+                'lyc suprem', 'lycra suprem', 'suprem',
+                'polymens', 'poly mens', 'polymensh', 'polymen', 'polymenş',
+                'yagmur', 'yagmur desen', 'damla',
+                'petek'
+            ].map(normalize);
+            
+            const alerts = [];
+            
+            // Her ürün için toplam stok hesapla
+            for (const product of products) {
+                const normalizedName = normalize(product.name);
+                
+                // İzlenecek kumaş anahtarlarından biriyle eşleşiyor mu?
+                const isWatched = WATCHED_KEYWORDS.some(key => normalizedName.includes(key));
+                if (!isWatched) continue;
+                
+                // Bu ürünün toplam stok miktarını hesapla
+                const productLots = lots.filter(lot => lot.productId === product.id);
+                const totalStock = productLots.reduce((sum, lot) => sum + (NumberUtils.parseNumber(lot.remainingKg) || 0), 0);
+                
+                // Kritik seviyenin altındaysa uyarı ekle
+                if (totalStock < CRITICAL_THRESHOLD) {
+                    alerts.push({
+                        productId: product.id,
+                        productName: product.name,
+                        currentStock: NumberUtils.round(totalStock, 2),
+                        threshold: CRITICAL_THRESHOLD,
+                        severity: totalStock < 100 ? 'critical' : 'warning',
+                        message: `${product.name} stok seviyesi kritik: ${NumberUtils.formatKg(totalStock)} (Min: ${NumberUtils.formatKg(CRITICAL_THRESHOLD)})`
+                    });
+                }
+            }
+            
+            return alerts;
+        } catch (error) {
+            console.error('Stock alert service error:', error);
+            return [];
+        }
+    }
+    
+    // Tüm uyarıları temizle (stok 500kg üzerine çıktığında)
+    static async clearResolvedAlerts() {
+        const alerts = await this.getLowStockAlerts();
+        return alerts.length === 0;
     }
 }
 
@@ -1558,5 +1802,7 @@ window.InventoryService = InventoryService;
 window.ShipmentService = ShipmentService;
 window.PaymentService = PaymentService;
 window.SupplierService = SupplierService;
+window.YarnTypeService = YarnTypeService;
 window.ProductionCostService = ProductionCostService;
 window.DashboardService = DashboardService;
+window.StockAlertService = StockAlertService;

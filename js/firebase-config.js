@@ -64,11 +64,22 @@ export class FirestoreDatabase {
             shipments: 'shipments',
             payments: 'payments',
             productionCosts: 'productionCosts',
+            rawBalances: 'rawBalances',
             suppliers: 'suppliers',
             supplierPayments: 'supplierPayments',
             supplierPriceLists: 'supplierPriceLists',
             settings: 'settings'
         };
+    }
+
+    // Guarded collection reference creator
+    safeCollection(path) {
+        const finalPath = typeof path === 'string' ? path.trim() : '';
+        if (!finalPath) {
+            console.error('🔥 Empty collection path!', { path });
+            throw new Error('Empty collection path');
+        }
+        return collection(this.db, finalPath);
     }
 
     // Clean data for Firestore (remove undefined, null, functions, etc.)
@@ -131,7 +142,8 @@ export class FirestoreDatabase {
         try {
             console.log('➕ Firebase create çağrıldı:', { storeName, data });
             
-            const collectionRef = collection(this.db, this.collections[storeName]);
+            const collName = this.collections[storeName] || storeName;
+            const collectionRef = this.safeCollection(collName);
             
             // Clean data for Firebase (remove undefined, convert dates, etc.)
             const cleanData = this.cleanDataForFirestore(data);
@@ -156,8 +168,11 @@ export class FirestoreDatabase {
     async readAll(storeName) {
         try {
             const collName = this.collections[storeName] || storeName;
-            if (!collName) { throw new Error(`Geçersiz koleksiyon: ${storeName}`); }
-            const collectionRef = collection(this.db, collName);
+            if (!collName || collName.trim() === '') {
+                console.warn(`ReadAll: Geçersiz collection adı: ${storeName}`);
+                return [];
+            }
+            const collectionRef = this.safeCollection(collName);
             const querySnapshot = await getDocs(collectionRef);
             
             return querySnapshot.docs.map(doc => ({
@@ -166,13 +181,16 @@ export class FirestoreDatabase {
             }));
         } catch (error) {
             console.error(`ReadAll error for ${storeName}:`, error);
-            throw error;
+            // Hata durumunda boş dizi dön (uygulamanın çökmesini önle)
+            return [];
         }
     }
 
     // Read - Tek kayıt getir
     async read(storeName, id) {
         try {
+            const collName = this.collections[storeName] || storeName;
+            
             // ID'yi string'e çevir ve validate et
             const docId = String(id).trim();
             if (!docId || docId === 'undefined' || docId === 'null') {
@@ -180,7 +198,7 @@ export class FirestoreDatabase {
                 return null;
             }
             
-            const docRef = doc(this.db, this.collections[storeName], docId);
+            const docRef = doc(this.db, collName, docId);
             const docSnap = await getDoc(docRef);
             
             if (docSnap.exists()) {
@@ -199,6 +217,8 @@ export class FirestoreDatabase {
     // Update - Kayıt güncelle
     async update(storeName, idOrData, maybeData) {
         try {
+            const collName = this.collections[storeName] || storeName;
+            
             // İmza esnekliği: update(store, id, data) veya update(store, data)
             const isSecondParamObject = typeof idOrData === 'object' && idOrData !== null && !maybeData;
             const data = isSecondParamObject ? idOrData : maybeData;
@@ -215,7 +235,7 @@ export class FirestoreDatabase {
 
             console.log('📝 Document ID (final):', docId);
 
-            const docRef = doc(this.db, this.collections[storeName], docId);
+            const docRef = doc(this.db, collName, docId);
 
             // Firebase için veriyi temizle
             const cleanData = this.cleanDataForFirestore(data || {});
@@ -238,11 +258,13 @@ export class FirestoreDatabase {
     // Delete - Kayıt sil
     async delete(storeName, id) {
         try {
+            const collName = this.collections[storeName] || storeName;
+            
             const docId = String(id).trim();
             if (!docId || docId === 'undefined' || docId === 'null' || docId === '[object Object]') {
                 throw new Error(`Geçersiz document ID: ${id} (tip: ${typeof id})`);
             }
-            const docRef = doc(this.db, this.collections[storeName], docId);
+            const docRef = doc(this.db, collName, docId);
             await deleteDoc(docRef);
             return true;
         } catch (error) {
@@ -254,7 +276,12 @@ export class FirestoreDatabase {
     // Query by Index - Index ile sorgula
     async queryByIndex(storeName, indexName, value) {
         try {
-            const collectionRef = collection(this.db, this.collections[storeName]);
+            const collName = this.collections[storeName] || storeName;
+            if (!collName) {
+                console.warn(`QueryByIndex: Geçersiz collection adı: ${storeName}`);
+                return [];
+            }
+            const collectionRef = this.safeCollection(collName);
             const q = query(collectionRef, where(indexName, '==', value));
             const querySnapshot = await getDocs(q);
             

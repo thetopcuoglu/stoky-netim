@@ -26,7 +26,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=103">
+    <link rel="stylesheet" href="styles.css?v=109">
     <link rel="stylesheet" href="print.css" media="print">
 </head>
 <body>
@@ -124,6 +124,18 @@
                                 Raporlar
                         </button>
                         </div>
+                    </div>
+                </div>
+
+                <!-- Stock Alerts Section -->
+                <div id="stock-alerts-section" class="stock-alerts-container" style="display: none;">
+                    <div class="stock-alert-header">
+                        <div class="alert-icon">⚠️</div>
+                        <h3>Stok Uyarıları</h3>
+                        <button class="alert-dismiss" onclick="dismissStockAlerts()">×</button>
+                    </div>
+                    <div id="stock-alerts-list" class="stock-alerts-list">
+                        <!-- Stock alerts will be populated here -->
                     </div>
                 </div>
 
@@ -246,12 +258,37 @@
             <!-- Customers Page -->
             <div id="customers-page" class="page">
                 <div class="page-header">
-                    <h2>Müşteriler</h2>
+                    <h2>👥 Müşteriler</h2>
                     <div class="page-actions">
                         <button class="btn btn-primary" onclick="showNewCustomerModal()">
                             <span class="icon">+</span>
                             Yeni Müşteri
                         </button>
+                    </div>
+                </div>
+                
+                <!-- Alacaklar Özeti -->
+                <div class="customer-summary-cards">
+                    <div class="summary-card receivables-card">
+                        <div class="card-icon">💰</div>
+                        <div class="card-content">
+                            <span class="card-label">Toplam Alacak</span>
+                            <span class="card-amount" id="customers-total-receivables">$0.00</span>
+                        </div>
+                    </div>
+                    <div class="summary-card customers-count-card">
+                        <div class="card-icon">👥</div>
+                        <div class="card-content">
+                            <span class="card-label">Borçlu Müşteri</span>
+                            <span class="card-amount" id="customers-with-debt-count">0</span>
+                        </div>
+                    </div>
+                    <div class="summary-card avg-debt-card">
+                        <div class="card-icon">📊</div>
+                        <div class="card-content">
+                            <span class="card-label">Ortalama Borç</span>
+                            <span class="card-amount" id="customers-avg-debt">$0.00</span>
+                        </div>
                     </div>
                 </div>
                 
@@ -552,6 +589,7 @@
                                 <th data-sort="id">Sevk No</th>
                                 <th data-sort="date">Tarih</th>
                                 <th data-sort="customerName">Müşteri</th>
+                                <th data-sort="fabricNames">Kumaş Adları</th>
                                 <th data-sort="totalKg">Toplam Kg</th>
                                 <th data-sort="totalUsd">Toplam USD</th>
                                 <th data-sort="note">Not</th>
@@ -577,22 +615,23 @@
                     </div>
                 </div>
 
-                <!-- Toplam Borç Özeti -->
-                <div class="simple-summary">
-                    <div class="summary-row">
-                        <div class="summary-item total">
-                            <span class="label">Toplam Tedarikçi Borcu:</span>
-                            <span class="amount" id="total-supplier-debt">$0.00</span>
+                <!-- Borç Özeti Kartları -->
+                <div class="supplier-summary-cards">
+                    <div class="summary-card usd-card">
+                        <div class="card-icon">💵</div>
+                        <div class="card-content">
+                            <span class="card-label">USD Borçlar</span>
+                            <span class="card-sublabel">(İplik + Örme)</span>
+                            <span class="card-amount" id="total-usd-debt">$0.00</span>
                         </div>
                     </div>
-                    
-                    <!-- Para Birimi Toggle -->
-                    <div class="currency-toggle-container">
-                        <label class="toggle-label">
-                            <input type="checkbox" id="currency-toggle" onchange="toggleCurrencyDisplay()">
-                            <span class="toggle-slider"></span>
-                            <span class="toggle-text">TL Görüntüle</span>
-                        </label>
+                    <div class="summary-card try-card">
+                        <div class="card-icon">💰</div>
+                        <div class="card-content">
+                            <span class="card-label">TL Borçlar</span>
+                            <span class="card-sublabel">(Boyahane)</span>
+                            <span class="card-amount" id="total-try-debt">₺0,00</span>
+                        </div>
                     </div>
                 </div>
 
@@ -606,7 +645,7 @@
                             <tr>
                                 <th>Tedarikçi Adı</th>
                                 <th>Tür</th>
-                                <th>İletişim</th>
+                                <th>Para Birimi</th>
                                 <th>Toplam Borç</th>
                                 <th>Ödenen</th>
                                 <th>Kalan Borç</th>
@@ -631,9 +670,25 @@
                         <h2 id="supplier-detail-title">Tedarikçi Detayı</h2>
                     </div>
                     <div class="header-actions">
-                        <button class="btn btn-info" onclick="showSupplierPriceListModal()">
+                        <button id="btn-supplier-price-list" class="btn btn-info" onclick="showSupplierPriceListModal()">
                             <span class="icon">💰</span>
                             Fiyat Listesi
+                        </button>
+                        <button id="btn-yarn-price-list" class="btn btn-info" onclick="showYarnTypePriceListModal()" style="display:none;">
+                            <span class="icon">💰</span>
+                            İplik Fiyat Listesi
+                        </button>
+                        <button id="btn-yarn-types" class="btn btn-secondary" onclick="showYarnTypesManageModal()" style="display:none;">
+                            <span class="icon">🧶</span>
+                            İplik Türleri
+                        </button>
+                        <button id="btn-raw-material-shipment" class="btn btn-success" onclick="showNewRawMaterialShipmentModal()" style="display:none;">
+                            <span class="icon">📦</span>
+                            Ham Kumaş Gönder
+                        </button>
+                        <button id="btn-yarn-shipment" class="btn btn-success" onclick="showNewYarnShipmentModal()" style="display:none;">
+                            <span class="icon">🧵</span>
+                            İplik Girişi
                         </button>
                         <button class="btn btn-primary" onclick="showNewSupplierPaymentModal()">
                             <span class="icon">$</span>
@@ -696,7 +751,7 @@
                     </div>
                     <div class="detail-content">
                         <div class="detail-row">
-                            <span class="label">Açılış Bakiyesi (TL):</span>
+                            <span class="label" id="supplier-opening-balance-label">Açılış Bakiyesi:</span>
                             <input type="number" id="supplier-opening-balance" step="0.01" min="0" placeholder="0" style="max-width:200px;">
                         </div>
                         <div class="detail-row">
@@ -780,16 +835,35 @@
                             </button>
                         </div>
                     </div>
+                    
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Günlük Sevk Raporu</h3>
+                        </div>
+                        <div class="card-content">
+                            <p>Belirli bir günde firma bazlı sevk detayları</p>
+                            <button class="btn btn-primary" onclick="showDailyReportModal()">
+                                <span class="icon">📅</span>
+                                Günlük Rapor
+                            </button>
+                        </div>
+                    </div>
                 </div>
                 
                 <div id="report-results" class="report-results hidden">
                     <div class="card">
                         <div class="card-header">
                             <h3 id="report-title">Rapor Sonuçları</h3>
-                            <button class="btn btn-secondary" onclick="exportReportCSV()">
-                                <span class="icon">📥</span>
-                                CSV Dışa Aktar
-                            </button>
+                            <div class="header-actions">
+                                <button class="btn btn-secondary" onclick="exportReportCSV()">
+                                    <span class="icon">📥</span>
+                                    CSV Dışa Aktar
+                                </button>
+                                <button class="btn btn-primary" onclick="printDailyReport()" id="print-daily-report-btn" style="display: none;">
+                                    <span class="icon">🖨️</span>
+                                    PDF Yazdır
+                                </button>
+                            </div>
                         </div>
                         <div class="card-content">
                             <div class="table-container">
@@ -920,7 +994,7 @@
     <!-- Modals will be added here by JavaScript -->
     <div id="modal-container"></div>
 
-    <script src="js/utils.js?v=104"></script>
+    <script src="js/utils.js?v=107"></script>
     <!-- Firebase Bağlantı Durumu -->
     <div id="connection-status" class="connection-status">
         <div class="status-indicator">
@@ -928,12 +1002,12 @@
         </div>
     </div>
 
-    <script src="js/database.js?v=104"></script>
-    <script src="js/services.js?v=104"></script>
-    <script src="js/modals.js?v=104"></script>
-    <script src="js/pages.js?v=104"></script>
-    <script src="js/firebase-setup.js?v=104"></script>
-    <script src="js/app.js?v=104"></script>
+    <script src="js/database.js?v=107"></script>
+    <script src="js/services.js?v=112"></script>
+    <script src="js/modals.js?v=111"></script>
+    <script src="js/pages.js?v=112"></script>
+    <script src="js/firebase-setup.js?v=107"></script>
+    <script src="js/app.js?v=108"></script>
     
 
 </body>

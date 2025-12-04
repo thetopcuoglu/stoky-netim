@@ -4,7 +4,7 @@
 class IndexedDBDatabase {
     constructor() {
         this.dbName = 'KumasStokDB';
-        this.version = 4;
+        this.version = 6;
         this.db = null;
         this.stores = {
             customers: 'customers',
@@ -15,6 +15,9 @@ class IndexedDBDatabase {
             productionCosts: 'productionCosts',
             supplierPayments: 'supplierPayments',
             supplierPriceLists: 'supplierPriceLists',
+            rawMaterialShipments: 'rawMaterialShipments',
+            yarnTypes: 'yarnTypes',
+            yarnShipments: 'yarnShipments',
             settings: 'settings'
         };
     }
@@ -113,6 +116,35 @@ class IndexedDBDatabase {
             priceListsStore.createIndex('supplierId', 'supplierId', { unique: false });
             priceListsStore.createIndex('supplierType', 'supplierType', { unique: false });
             priceListsStore.createIndex('productId', 'productId', { unique: false });
+        }
+
+        // Raw Balances store (USD cari)
+        if (!db.objectStoreNames.contains('rawBalances')) {
+            const rawBalancesStore = db.createObjectStore('rawBalances', { keyPath: 'id' });
+            rawBalancesStore.createIndex('date', 'date', { unique: false });
+        }
+
+        // Raw Material Shipments store (Ham kumaş gönderimleri)
+        if (!db.objectStoreNames.contains('rawMaterialShipments')) {
+            const rawMaterialShipmentsStore = db.createObjectStore('rawMaterialShipments', { keyPath: 'id' });
+            rawMaterialShipmentsStore.createIndex('supplierId', 'supplierId', { unique: false });
+            rawMaterialShipmentsStore.createIndex('productId', 'productId', { unique: false });
+            rawMaterialShipmentsStore.createIndex('date', 'date', { unique: false });
+        }
+
+        // Yarn Types store (İplik çeşitleri)
+        if (!db.objectStoreNames.contains('yarnTypes')) {
+            const yarnTypesStore = db.createObjectStore('yarnTypes', { keyPath: 'id' });
+            yarnTypesStore.createIndex('name', 'name', { unique: false });
+            yarnTypesStore.createIndex('code', 'code', { unique: false });
+        }
+
+        // Yarn Shipments store (İplik girişleri)
+        if (!db.objectStoreNames.contains('yarnShipments')) {
+            const yarnShipmentsStore = db.createObjectStore('yarnShipments', { keyPath: 'id' });
+            yarnShipmentsStore.createIndex('supplierId', 'supplierId', { unique: false });
+            yarnShipmentsStore.createIndex('yarnTypeId', 'yarnTypeId', { unique: false });
+            yarnShipmentsStore.createIndex('date', 'date', { unique: false });
         }
 
         // Settings store

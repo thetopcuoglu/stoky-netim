@@ -185,6 +185,12 @@ const NumberUtils = {
     // Round to specified decimal places
     round(value, decimals = 2) {
         return Math.round(value * Math.pow(10, decimals)) / Math.pow(10, decimals);
+    },
+    
+    // Format number with specified decimal places
+    formatNumber(value, decimals = 2) {
+        if (value === null || value === undefined) return '0';
+        return Number(value).toFixed(decimals);
     }
 };
 

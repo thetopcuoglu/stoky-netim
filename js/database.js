@@ -115,6 +115,12 @@ class IndexedDBDatabase {
             priceListsStore.createIndex('productId', 'productId', { unique: false });
         }
 
+        // Raw Balances store (USD cari)
+        if (!db.objectStoreNames.contains('rawBalances')) {
+            const rawBalancesStore = db.createObjectStore('rawBalances', { keyPath: 'id' });
+            rawBalancesStore.createIndex('date', 'date', { unique: false });
+        }
+
         // Settings store
         if (!db.objectStoreNames.contains('settings')) {
             db.createObjectStore('settings', { keyPath: 'key' });

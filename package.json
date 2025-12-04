@@ -1,0 +1,23 @@
+{
+  "name": "stoky-netim",
+  "version": "1.0.0",
+  "description": "Kumaş Stok Yönetimi Uygulaması",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "build": "echo 'Build completed'",
+    "firebase-deploy": "firebase deploy",
+    "firebase-serve": "firebase serve"
+  },
+  "keywords": ["stok", "yönetimi", "kumaş", "firebase", "web-app"],
+  "author": "MeshSoft",
+  "license": "MIT",
+  "devDependencies": {
+    "firebase-tools": "^13.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
+

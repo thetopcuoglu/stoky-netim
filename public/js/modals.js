@@ -1,4 +1,4 @@
-// Modal Management for Kumaş Stok Yönetimi
+// Modal Management for Kumaş Stok Yönetimifir
 
 class ModalManager {
     static currentModal = null;
@@ -342,23 +342,23 @@ async function showNewLotModal(lot = null) {
                             </button>
                         </div>
                         <div class="form-group">
+                            <label for="lot-total-kg">Toplam kg *</label>
+                            <input type="number" id="lot-total-kg" name="totalKg" required step="0.01" min="0.01" 
+                                   value="${lot?.totalKg || ''}" placeholder="Toplam kilo">
+                        </div>
+                        <div class="form-group">
                             <label for="lot-rolls">Rulo Sayısı *</label>
                             <input type="number" id="lot-rolls" name="rolls" required min="1" 
                                    value="${lot?.rolls || ''}" placeholder="Rulo sayısı">
                         </div>
                         <div class="form-group">
-                            <label for="lot-avg-kg">Ortalama kg/Rulo *</label>
-                            <input type="number" id="lot-avg-kg" name="avgKgPerRoll" required step="0.01" min="0.01" 
-                                   value="${lot?.avgKgPerRoll || ''}" placeholder="Ortalama kg/rulo">
+                            <label>Ortalama kg/Rulo</label>
+                            <input type="text" id="lot-avg-kg" disabled placeholder="Otomatik hesaplanacak">
                         </div>
                         <div class="form-group">
                             <label for="lot-date">Tarih *</label>
                             <input type="date" id="lot-date" name="date" required 
                                    value="${lot?.date ? DateUtils.getInputDate(new Date(lot.date)) : DateUtils.getInputDate()}">
-                        </div>
-                        <div class="form-group">
-                            <label>Toplam kg</label>
-                            <input type="text" id="lot-total-kg" disabled placeholder="Otomatik hesaplanacak">
                         </div>
                     </form>
                 </div>
@@ -463,23 +463,23 @@ async function showNewLotModal(lot = null) {
         console.error('❌ Edit modunda ama lot veya lot.id bulunamadı:', { lot, isEdit });
     }
     
-    // Add event listeners for automatic total calculation
+    // Add event listeners for automatic average kg calculation
     const rollsInput = document.getElementById('lot-rolls');
-    const avgKgInput = document.getElementById('lot-avg-kg');
     const totalKgInput = document.getElementById('lot-total-kg');
+    const avgKgInput = document.getElementById('lot-avg-kg');
     
-    function updateTotal() {
+    function updateAvgKg() {
         const rolls = NumberUtils.parseNumber(rollsInput.value);
-        const avgKg = NumberUtils.parseNumber(avgKgInput.value);
-        const total = rolls * avgKg;
-        totalKgInput.value = total > 0 ? NumberUtils.formatKg(total) + ' kg' : '';
+        const totalKg = NumberUtils.parseNumber(totalKgInput.value);
+        const avgKg = rolls > 0 && totalKg > 0 ? totalKg / rolls : 0;
+        avgKgInput.value = avgKg > 0 ? NumberUtils.formatKg(avgKg) + ' kg/rulo' : '';
     }
     
-    rollsInput.addEventListener('input', updateTotal);
-    avgKgInput.addEventListener('input', updateTotal);
+    rollsInput.addEventListener('input', updateAvgKg);
+    totalKgInput.addEventListener('input', updateAvgKg);
     
     // Initial calculation
-    updateTotal();
+    updateAvgKg();
 }
 
 async function saveLot(isEdit = false) {
@@ -493,13 +493,18 @@ async function saveLot(isEdit = false) {
         
         const formData = new FormData(form);
         
+        const totalKg = NumberUtils.parseNumber(formData.get('totalKg'));
+        const rolls = NumberUtils.parseNumber(formData.get('rolls'));
+        const avgKgPerRoll = rolls > 0 && totalKg > 0 ? totalKg / rolls : 0;
+        
         const lotData = {
             productId: formData.get('productId'),
             party: formData.get('party').trim(),
             color: formData.get('color').trim(),
             location: formData.get('location').trim(),
-            rolls: NumberUtils.parseNumber(formData.get('rolls')),
-            avgKgPerRoll: NumberUtils.parseNumber(formData.get('avgKgPerRoll')),
+            rolls: rolls,
+            avgKgPerRoll: avgKgPerRoll,
+            totalKg: totalKg,
             date: formData.get('date')
         };
         
@@ -905,6 +910,12 @@ async function showNewShipmentModal(customerId = null) {
                             <button type="button" class="btn btn-primary btn-sm mt-2" onclick="addShipmentLine()">
                                 Satır Ekle
                             </button>
+                            <div class="mt-2" style="display:flex; gap:8px; align-items:center;">
+                                <input type="text" id="party-quick" placeholder="Parti no girin" style="flex:1;" />
+                                <button type="button" class="btn btn-outline-primary btn-sm" onclick="addShipmentLineByParty()">
+                                    Parti No ile Ekle
+                                </button>
+                            </div>
                         </div>
                         
                         <div id="shipment-lines">
@@ -1187,6 +1198,61 @@ async function addShipmentLine() {
 	productSelect.value = '';
 }
 
+async function addShipmentLineByParty() {
+    try {
+        const input = document.getElementById('party-quick');
+        const query = (input?.value || '').trim();
+        if (!query) {
+            Toast.warning('Lütfen bir parti numarası girin');
+            return;
+        }
+
+        // Parti ile lot(lar)ı bul
+        const lots = await InventoryService.getByParty(query);
+        if (!lots || lots.length === 0) {
+            Toast.error('Bu parti numarasıyla stok bulunamadı');
+            return;
+        }
+
+        // Uygun stokta olan ilk lotu seç
+        const lot = lots.find(l => NumberUtils.parseNumber(l.remainingKg) > 0) || lots[0];
+
+        // Ürünü belirle ve satır oluştur
+        const product = await ProductService.getById(lot.productId);
+        if (!product) {
+            Toast.error('Partiye bağlı ürün bulunamadı');
+            return;
+        }
+
+        // Geçici olarak product-selector değerini set edip mevcut akışı kullan
+        const productSelect = document.getElementById('product-selector');
+        const prev = productSelect.value;
+        productSelect.value = lot.productId;
+        await addShipmentLine();
+        productSelect.value = prev;
+
+        // Son eklenen satırın id'si
+        const lineId = window.shipmentLineCounter;
+        // Bu satır için ilgili lotu otomatik seç
+        selectLot(lineId, lot.id);
+
+        // Seçilen lot bilgisini input'a yaz (kullanıcı geri bildirim)
+        const lotInfoInput = document.getElementById(`selected-lot-${lineId}`);
+        if (lotInfoInput && lot.party) {
+            lotInfoInput.value = `${lot.party}${lot.color ? ' - ' + lot.color : ''}${lot.location ? ' (' + lot.location + ')' : ''}`;
+        }
+
+        // Input'u boşalt
+        if (input) input.value = '';
+
+        Toast.success('Parti numarasına göre satır eklendi');
+    } catch (e) {
+        console.error('addShipmentLineByParty error:', e);
+        Toast.error('Parti numarasından satır eklenemedi');
+    }
+}
+
+
 function selectLot(lineId, lotId) {
 	// Remove previous selection
 	document.querySelectorAll(`#lots-${lineId} .lot-option`).forEach(opt => {
@@ -1449,6 +1515,12 @@ async function showEditShipmentModal(shipmentId) {
 		const customer = await CustomerService.getById(shipment.customerId);
 		const customerName = customer ? customer.name : 'Bilinmeyen Müşteri';
 		
+		// Get all customers for dropdown
+		const customers = await CustomerService.getAll();
+		const customerOptions = customers.map(c => 
+			`<option value="${c.id}" ${c.id === shipment.customerId ? 'selected' : ''}>${c.name}</option>`
+		).join('');
+		
 		let linesHtml = '';
 		shipment.lines.forEach((line, index) => {
 			linesHtml += `
@@ -1497,7 +1569,13 @@ async function showEditShipmentModal(shipmentId) {
 					<div class="modal-content" style="max-height: calc(90vh - 120px); overflow-y: auto;">
 						<div class="shipment-info">
 							<p><strong>Sevk No:</strong> #${shipment.id.substr(-8).toUpperCase()}</p>
-							<p><strong>Müşteri:</strong> ${customerName}</p>
+							<div class="form-group">
+								<label for="edit-shipment-customer"><strong>Müşteri *</strong></label>
+								<select id="edit-shipment-customer" name="customerId" required style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+									<option value="">Müşteri seçin</option>
+									${customerOptions}
+								</select>
+							</div>
 							<p><strong>Tarih:</strong> ${DateUtils.formatDate(shipment.date)}</p>
 							<p><strong>Not:</strong> ${shipment.note || '-'}</p>
 						</div>
@@ -1658,9 +1736,21 @@ async function saveEditedShipment(shipmentId) {
 		const oldTotalUsd = shipment.totals?.totalUsd || 0;
 		const oldTotalKg = shipment.totals?.totalKg || 0;
 		
+		// Get new customer ID from dropdown
+		const newCustomerId = document.getElementById('edit-shipment-customer').value;
+		if (!newCustomerId) {
+			throw new Error('Müşteri seçilmelidir');
+		}
+		
+		const oldCustomerId = shipment.customerId;
+		const customerChanged = oldCustomerId !== newCustomerId;
+		
 		console.log(`🔄 Sevk güncelleniyor: #${shipmentId.substr(-8).toUpperCase()}`);
 		console.log(`💰 Eski toplam: ${NumberUtils.formatUSD(oldTotalUsd)} → Yeni toplam: ${NumberUtils.formatUSD(totalUsd)}`);
 		console.log(`📦 Eski kg: ${NumberUtils.formatKg(oldTotalKg)} → Yeni kg: ${NumberUtils.formatKg(totalKg)}`);
+		if (customerChanged) {
+			console.log(`👤 Müşteri değişiyor: ${oldCustomerId} → ${newCustomerId}`);
+		}
 		
 		// Debug: Her satırın detaylarını göster
 		console.log(`🔍 Debug - Güncellenmiş Satırlar:`);
@@ -1669,29 +1759,66 @@ async function saveEditedShipment(shipmentId) {
 		});
 		console.log(`🔍 Debug - Toplam USD Hesaplama: ${updatedLines.map(l => l.lineTotalUsd).join(' + ')} = ${totalUsd}`);
 		
-		// 1. Update customer balance (müşteri bakiyesini güncelle)
-		const customer = await CustomerService.getById(shipment.customerId);
-		if (customer) {
-			const balanceDifference = totalUsd - oldTotalUsd;
-			const oldBalance = customer.balance || 0;
-			const newBalance = NumberUtils.round(oldBalance + balanceDifference, 2);
+		// 1. Update customer balances (müşteri bakiyelerini güncelle)
+		if (customerChanged) {
+			// Müşteri değiştiyse: eski müşteriden eski tutarı çıkar, yeni müşteriye yeni tutarı ekle
+			const oldCustomer = await CustomerService.getById(oldCustomerId);
+			const newCustomer = await CustomerService.getById(newCustomerId);
 			
-			console.log(`🔍 Debug - Eski Sevk Toplamı: ${NumberUtils.formatUSD(oldTotalUsd)}`);
-			console.log(`🔍 Debug - Yeni Sevk Toplamı: ${NumberUtils.formatUSD(totalUsd)}`);
-			console.log(`🔍 Debug - Bakiye Farkı: ${balanceDifference > 0 ? '+' : ''}${NumberUtils.formatUSD(balanceDifference)}`);
-			console.log(`🔍 Debug - Eski Bakiye: ${NumberUtils.formatUSD(oldBalance)}`);
-			console.log(`🔍 Debug - Yeni Bakiye: ${NumberUtils.formatUSD(newBalance)}`);
-			console.log(`🔍 Debug - Müşteri ID: ${shipment.customerId}`);
-			console.log(`🔍 Debug - Müşteri Adı: ${customer.name}`);
+			if (oldCustomer) {
+				// Eski müşterinin bakiyesinden eski sevk tutarını çıkar
+				const oldBalance = oldCustomer.balance || 0;
+				const newOldBalance = NumberUtils.round(oldBalance - oldTotalUsd, 2);
+				
+				await CustomerService.update({
+					...oldCustomer,
+					balance: newOldBalance
+				});
+				
+				console.log(`👤 Eski Müşteri ${oldCustomer.name}: Bakiye ${NumberUtils.formatUSD(oldBalance)} → ${NumberUtils.formatUSD(newOldBalance)} (-${NumberUtils.formatUSD(oldTotalUsd)} sevk kaldırıldı)`);
+			} else {
+				console.error(`❌ Eski müşteri bulunamadı: ${oldCustomerId}`);
+			}
 			
-			await CustomerService.update({
-				...customer,
-				balance: newBalance
-			});
-			
-			console.log(`👤 Müşteri ${customer.name}: Bakiye ${NumberUtils.formatUSD(oldBalance)} → ${NumberUtils.formatUSD(newBalance)} (${balanceDifference > 0 ? '+' : ''}${NumberUtils.formatUSD(balanceDifference)})`);
+			if (newCustomer) {
+				// Yeni müşterinin bakiyesine yeni sevk tutarını ekle
+				const newBalance = newCustomer.balance || 0;
+				const newNewBalance = NumberUtils.round(newBalance + totalUsd, 2);
+				
+				await CustomerService.update({
+					...newCustomer,
+					balance: newNewBalance
+				});
+				
+				console.log(`👤 Yeni Müşteri ${newCustomer.name}: Bakiye ${NumberUtils.formatUSD(newBalance)} → ${NumberUtils.formatUSD(newNewBalance)} (+${NumberUtils.formatUSD(totalUsd)} sevk eklendi)`);
+			} else {
+				console.error(`❌ Yeni müşteri bulunamadı: ${newCustomerId}`);
+			}
 		} else {
-			console.error(`❌ Müşteri bulunamadı: ${shipment.customerId}`);
+			// Müşteri değişmediyse: sadece bakiye farkını uygula
+			const customer = await CustomerService.getById(oldCustomerId);
+			if (customer) {
+				const balanceDifference = totalUsd - oldTotalUsd;
+				const oldBalance = customer.balance || 0;
+				const newBalance = NumberUtils.round(oldBalance + balanceDifference, 2);
+				
+				console.log(`🔍 Debug - Eski Sevk Toplamı: ${NumberUtils.formatUSD(oldTotalUsd)}`);
+				console.log(`🔍 Debug - Yeni Sevk Toplamı: ${NumberUtils.formatUSD(totalUsd)}`);
+				console.log(`🔍 Debug - Bakiye Farkı: ${balanceDifference > 0 ? '+' : ''}${NumberUtils.formatUSD(balanceDifference)}`);
+				console.log(`🔍 Debug - Eski Bakiye: ${NumberUtils.formatUSD(oldBalance)}`);
+				console.log(`🔍 Debug - Yeni Bakiye: ${NumberUtils.formatUSD(newBalance)}`);
+				console.log(`🔍 Debug - Müşteri ID: ${oldCustomerId}`);
+				console.log(`🔍 Debug - Müşteri Adı: ${customer.name}`);
+				
+				await CustomerService.update({
+					...customer,
+					balance: newBalance
+				});
+				
+				console.log(`👤 Müşteri ${customer.name}: Bakiye ${NumberUtils.formatUSD(oldBalance)} → ${NumberUtils.formatUSD(newBalance)} (${balanceDifference > 0 ? '+' : ''}${NumberUtils.formatUSD(balanceDifference)})`);
+			} else {
+				console.error(`❌ Müşteri bulunamadı: ${oldCustomerId}`);
+			}
 		}
 		
 		// 2. Update stock allocations (stok tahsislerini güncelle)
@@ -1724,6 +1851,7 @@ async function saveEditedShipment(shipmentId) {
 		// 4. Update shipment
 		const updatedShipment = {
 			...shipment,
+			customerId: newCustomerId, // Yeni müşteri ID'sini güncelle
 			lines: updatedLines,
 			totals: {
 				totalKg: totalKg,
@@ -1989,6 +2117,60 @@ async function saveSupplier(isEdit = false) {
 		console.error('Supplier save error:', error);
 		Toast.error(error.message);
 	}
+}
+
+// Daily Report Modal
+async function showDailyReportModal() {
+    try {
+        // Get customers for dropdown
+        const customers = await CustomerService.getAll();
+        const customerOptions = customers.map(customer => 
+            `<option value="${customer.id}">${customer.name}</option>`
+        ).join('');
+        
+        // Get today's date as default
+        const today = new Date().toISOString().split('T')[0];
+        
+        const modalHtml = `
+            <div class="modal-overlay">
+                <div class="modal" style="width: 500px;">
+                    <div class="modal-header">
+                        <h3>Günlük Sevk Raporu</h3>
+                        <button class="modal-close" onclick="ModalManager.hide()">×</button>
+                    </div>
+                    <div class="modal-content">
+                        <form id="daily-report-form">
+                            <div class="form-group">
+                                <label for="daily-report-customer">Firma *</label>
+                                <select id="daily-report-customer" name="customerId" required>
+                                    <option value="">Firma seçin</option>
+                                    ${customerOptions}
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="daily-report-date">Tarih *</label>
+                                <input type="date" id="daily-report-date" name="date" required 
+                                       value="${today}" max="${today}">
+                            </div>
+                        </form>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" onclick="ModalManager.hide()">İptal</button>
+                        <button type="button" class="btn btn-primary" onclick="generateDailyReport()">
+                            <span class="icon">📊</span>
+                            Rapor Oluştur
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        ModalManager.show(modalHtml);
+        
+    } catch (error) {
+        console.error('Show daily report modal error:', error);
+        Toast.error('Rapor modalı açılırken hata oluştu');
+    }
 }
 
 // Supplier Payment Modal
@@ -2657,18 +2839,52 @@ async function showSupplierPriceListModal() {
 			Toast.error('Tedarikçi bulunamadı');
 			return;
 		}
+		
+		const supplier = await SupplierService.getById(supplierId);
+		if (!supplier) {
+			Toast.error('Tedarikçi bilgisi alınamadı');
+			return;
+		}
+		
+		// İplik tedarikçileri için iplik çeşitleri fiyat listesi modalını göster
+		if (supplier.type === 'iplik') {
+			await showYarnTypePriceListModal();
+			return;
+		}
+		
+		// Örme tedarikçileri için USD, diğerleri için TL
+		const isUSD = supplier.type === 'orme';
+		const currencyLabel = isUSD ? 'USD/KG' : 'TL/KG';
+		const currencyCode = isUSD ? 'USD' : 'TRY';
+		
 		const [products, priceList] = await Promise.all([
 			ProductService.getAll(),
 			SupplierService.getPriceListBySupplier(supplierId)
 		]);
+		
 		const rows = products.map(p => {
 			const existing = priceList.find(x => x.productId === p.id);
-			const val = existing ? existing.pricePerKg : '';
+			// Mevcut fiyatı göster (currency'ye göre)
+			let val = '';
+			if (existing && existing.pricePerKg) {
+				// Eğer mevcut currency farklıysa dönüştür
+				if (existing.currency === 'TRY' && isUSD) {
+					// TL'den USD'ye çevir
+					const exchangeRate = window.currentExchangeRate || 30.50;
+					val = NumberUtils.round(existing.pricePerKg / exchangeRate, 2);
+				} else if (existing.currency === 'USD' && !isUSD) {
+					// USD'den TL'ye çevir
+					const exchangeRate = window.currentExchangeRate || 30.50;
+					val = NumberUtils.round(existing.pricePerKg * exchangeRate, 2);
+				} else {
+					val = existing.pricePerKg;
+				}
+			}
 			return `
 				<tr>
 					<td>${p.name}</td>
 					<td>
-						<input type=\"number\" class=\"price-input\" data-product-id=\"${p.id}\" value=\"${val}\" step=\"0.01\" min=\"0\" placeholder=\"TL/KG\">
+						<input type=\"number\" class=\"price-input\" data-product-id=\"${p.id}\" value=\"${val}\" step=\"0.01\" min=\"0\" placeholder=\"${currencyLabel}\">
 					</td>
 					<td>
 						<button class=\"btn btn-sm btn-primary\" onclick=\"saveSupplierProductPrice('${p.id}')\">Kaydet</button>
@@ -2676,11 +2892,12 @@ async function showSupplierPriceListModal() {
 				</tr>
 			`;
 		}).join('');
+		
 		const html = `
 			<div class=\"modal-overlay\">
 				<div class=\"modal\" style=\"width: 700px; max-height: 80vh;\">
 					<div class=\"modal-header\">
-						<h3>Tedarikçi Fiyat Listesi (TL/KG)</h3>
+						<h3>Tedarikçi Fiyat Listesi (${currencyLabel})</h3>
 						<button class=\"modal-close\" onclick=\"ModalManager.hide()\">×</button>
 					</div>
 					<div class=\"modal-content\">
@@ -2688,7 +2905,7 @@ async function showSupplierPriceListModal() {
 							<thead>
 								<tr>
 									<th>Kumaş</th>
-									<th>Fiyat (TL/KG)</th>
+									<th>Fiyat (${currencyLabel})</th>
 									<th>İşlem</th>
 								</tr>
 							</thead>
@@ -2711,11 +2928,22 @@ async function showSupplierPriceListModal() {
 async function saveSupplierProductPrice(productId) {
 	try {
 		const supplierId = window.currentSupplierId;
+		const supplier = await SupplierService.getById(supplierId);
+		if (!supplier) {
+			Toast.error('Tedarikçi bulunamadı');
+			return;
+		}
+		
+		// Örme ve İplik tedarikçileri için USD, diğerleri için TRY
+		const isUSD = supplier.type === 'orme' || supplier.type === 'iplik';
+		const currency = isUSD ? 'USD' : 'TRY';
+		
 		const input = document.querySelector(`.price-input[data-product-id=\"${productId}\"]`);
 		const price = NumberUtils.parseNumber(input.value);
 		if (price < 0) { Toast.error('Fiyat negatif olamaz'); return; }
-		await SupplierService.setSupplierProductPrice(supplierId, productId, price, 'TRY');
-		Toast.success('Fiyat kaydedildi');
+		
+		await SupplierService.setSupplierProductPrice(supplierId, productId, price, currency);
+		Toast.success(`Fiyat kaydedildi (${currency})`);
 	} catch (e) {
 		console.error('saveSupplierProductPrice error:', e);
 		Toast.error('Fiyat kaydedilemedi');
@@ -2725,16 +2953,26 @@ async function saveSupplierProductPrice(productId) {
 async function saveAllSupplierPrices() {
 	try {
 		const supplierId = window.currentSupplierId;
+		const supplier = await SupplierService.getById(supplierId);
+		if (!supplier) {
+			Toast.error('Tedarikçi bulunamadı');
+			return;
+		}
+		
+		// Örme ve İplik tedarikçileri için USD, diğerleri için TRY
+		const isUSD = supplier.type === 'orme' || supplier.type === 'iplik';
+		const currency = isUSD ? 'USD' : 'TRY';
+		
 		const inputs = document.querySelectorAll('.price-input');
 		let count = 0;
 		for (const input of inputs) {
 			const price = NumberUtils.parseNumber(input.value);
 			if (price > 0) {
-				await SupplierService.setSupplierProductPrice(supplierId, input.dataset.productId, price, 'TRY');
+				await SupplierService.setSupplierProductPrice(supplierId, input.dataset.productId, price, currency);
 				count++;
 			}
 		}
-		Toast.success(`${count} fiyat kaydedildi`);
+		Toast.success(`${count} fiyat kaydedildi (${currency})`);
 		ModalManager.hide();
 	} catch (e) {
 		console.error('saveAllSupplierPrices error:', e);
@@ -2757,6 +2995,7 @@ window.selectLot = selectLot;
 window.updateLineTotal = updateLineTotal;
 window.removeLine = removeLine;
 window.addShipmentLine = addShipmentLine;
+window.addShipmentLineByParty = addShipmentLineByParty;
 window.saveShipment = saveShipment;
 window.saveCustomer = saveCustomer;
 window.saveProduct = saveProduct;
@@ -2783,3 +3022,1072 @@ window.saveAllPrices = saveAllPrices;
 window.showSupplierPriceListModal = showSupplierPriceListModal;
 window.saveSupplierProductPrice = saveSupplierProductPrice;
 window.saveAllSupplierPrices = saveAllSupplierPrices;
+
+// Ham Kumaş Gönderimi Modalı (Örme Tedarikçileri için)
+async function showNewRawMaterialShipmentModal() {
+    const supplierId = window.currentSupplierId;
+    if (!supplierId) {
+        Toast.error('Tedarikçi seçilmedi');
+        return;
+    }
+    
+    const supplier = await SupplierService.getById(supplierId);
+    if (!supplier || supplier.type !== 'orme') {
+        Toast.error('Bu işlem sadece örme tedarikçileri için geçerlidir');
+        return;
+    }
+    
+    const [products, priceList] = await Promise.all([
+        ProductService.getAll(),
+        SupplierService.getPriceListBySupplier(supplierId)
+    ]);
+    
+    const modalHtml = `
+        <div class="modal-overlay">
+            <div class="modal" style="width: 600px;">
+                <div class="modal-header">
+                    <h3>Ham Kumaş Gönderimi - ${supplier.name}</h3>
+                    <button class="modal-close" onclick="ModalManager.hide()">×</button>
+                </div>
+                <div class="modal-content">
+                    <form id="raw-material-shipment-form">
+                        <div class="form-group">
+                            <label for="raw-material-product">Ham Kumaş *</label>
+                            <select id="raw-material-product" name="productId" required>
+                                <option value="">Seçin</option>
+                                ${products.map(p => `<option value="${p.id}" data-name="${p.name}">${p.name}</option>`).join('')}
+                            </select>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="raw-material-kg">Miktar (KG) *</label>
+                                <input type="number" id="raw-material-kg" name="kg" required step="0.01" min="0.01" 
+                                       placeholder="0.00" onchange="updateRawMaterialTotal()">
+                            </div>
+                            <div class="form-group">
+                                <label for="raw-material-date">Tarih *</label>
+                                <input type="date" id="raw-material-date" name="date" required 
+                                       value="${DateUtils.getInputDate()}">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="raw-material-price-per-kg">Birim Fiyat (USD/kg) *</label>
+                                <input type="number" id="raw-material-price-per-kg" name="pricePerKg" required 
+                                       step="0.01" min="0" placeholder="0.00" onchange="updateRawMaterialTotal()">
+                                <small class="form-hint">Örme tedarikçisinin sabit fiyatı</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="raw-material-total">Toplam (USD)</label>
+                                <input type="text" id="raw-material-total" readonly 
+                                       placeholder="Otomatik hesaplanacak" style="font-weight: bold; color: #2563eb;">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="raw-material-note">Not</label>
+                            <textarea id="raw-material-note" name="note" 
+                                      placeholder="İsteğe bağlı notlar"></textarea>
+                        </div>
+                        <input type="hidden" name="supplierId" value="${supplierId}">
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="ModalManager.hide()">İptal</button>
+                    <button type="button" class="btn btn-primary" onclick="saveRawMaterialShipment()">Kaydet</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    ModalManager.show(modalHtml);
+    
+    // Ürün seçildiğinde fiyatı otomatik doldur
+    const productSelect = document.getElementById('raw-material-product');
+    const priceInput = document.getElementById('raw-material-price-per-kg');
+    
+    if (productSelect && priceInput) {
+        productSelect.addEventListener('change', () => {
+            const productId = productSelect.value;
+            if (productId) {
+                const price = priceList.find(p => p.productId === productId);
+                if (price && price.pricePerKg) {
+                    // Fiyat USD olarak saklanıyor mu kontrol et
+                    // Eğer TL ise USD'ye çevir
+                    let priceUSD = price.pricePerKg;
+                    if (price.currency === 'TRY') {
+                        const exchangeRate = window.currentExchangeRate || 30.50;
+                        priceUSD = NumberUtils.round(price.pricePerKg / exchangeRate, 2);
+                    }
+                    priceInput.value = priceUSD.toFixed(2);
+                    updateRawMaterialTotal();
+                }
+            }
+        });
+    }
+}
+
+// Ham kumaş gönderimi toplamını güncelle
+function updateRawMaterialTotal() {
+    const kg = NumberUtils.parseNumber(document.getElementById('raw-material-kg')?.value || 0);
+    const pricePerKg = NumberUtils.parseNumber(document.getElementById('raw-material-price-per-kg')?.value || 0);
+    const total = NumberUtils.round(kg * pricePerKg, 2);
+    const totalInput = document.getElementById('raw-material-total');
+    if (totalInput) {
+        totalInput.value = NumberUtils.formatUSD(total);
+    }
+}
+
+// Ham kumaş gönderimi kaydet
+async function saveRawMaterialShipment() {
+    try {
+        const form = document.getElementById('raw-material-shipment-form');
+        if (!form) {
+            Toast.error('Form bulunamadı');
+            return;
+        }
+        
+        const formData = new FormData(form);
+        const supplierId = formData.get('supplierId');
+        const productId = formData.get('productId');
+        const kg = NumberUtils.parseNumber(formData.get('kg'));
+        const pricePerKg = NumberUtils.parseNumber(formData.get('pricePerKg'));
+        const date = formData.get('date');
+        const note = formData.get('note')?.trim() || '';
+        
+        if (!supplierId || !productId || !kg || !pricePerKg || !date) {
+            Toast.error('Lütfen tüm zorunlu alanları doldurun');
+            return;
+        }
+        
+        const supplier = await SupplierService.getById(supplierId);
+        if (!supplier || supplier.type !== 'orme') {
+            Toast.error('Bu işlem sadece örme tedarikçileri için geçerlidir');
+            return;
+        }
+        
+        const product = await ProductService.getById(productId);
+        if (!product) {
+            Toast.error('Ürün bulunamadı');
+            return;
+        }
+        
+        const totalCost = NumberUtils.round(kg * pricePerKg, 2);
+        
+        // 1. Raw Material Shipment kaydı oluştur
+        const shipmentData = {
+            supplierId: supplierId,
+            productId: productId,
+            productName: product.name,
+            kg: kg,
+            pricePerKg: pricePerKg,
+            totalCost: totalCost,
+            currency: 'USD',
+            date: date,
+            note: note
+        };
+        
+        const shipment = await db.create('rawMaterialShipments', shipmentData);
+        console.log('✅ Ham kumaş gönderimi kaydedildi:', shipment);
+        
+        // 2. ProductionCost oluştur (ormeCost dolu, diğerleri 0)
+        const costData = {
+            lotId: null, // Ham kumaş gönderimi için lot yok
+            productId: productId,
+            supplierId: supplierId,
+            iplikCost: 0,
+            ormeCost: totalCost, // USD olarak
+            boyahaneCost: 0,
+            totalCost: totalCost,
+            paidAmount: 0,
+            status: 'pending',
+            pricePerKg: pricePerKg,
+            currency: 'USD',
+            rawMaterialShipmentId: shipment.id // İlişki için
+        };
+        
+        const productionCost = await ProductionCostService.create(costData);
+        console.log('✅ ProductionCost oluşturuldu:', productionCost);
+        
+        ModalManager.hide();
+        Toast.success(`Ham kumaş gönderimi kaydedildi: ${kg}kg × $${pricePerKg.toFixed(2)} = ${NumberUtils.formatUSD(totalCost)}`);
+        
+        // Ekstre sayfasını yenile
+        if (document.getElementById('supplier-detail-page')?.classList.contains('active')) {
+            await loadSupplierExtract(supplierId);
+        }
+        
+    } catch (error) {
+        console.error('Ham kumaş gönderimi kaydetme hatası:', error);
+        Toast.error(error.message || 'Kayıt sırasında hata oluştu');
+    }
+}
+
+window.showNewRawMaterialShipmentModal = showNewRawMaterialShipmentModal;
+window.saveRawMaterialShipment = saveRawMaterialShipment;
+window.updateRawMaterialTotal = updateRawMaterialTotal;
+
+// İplik Çeşitleri Fiyat Listesi Modalı (İplik Tedarikçileri için)
+async function showYarnTypePriceListModal() {
+    try {
+        const supplierId = window.currentSupplierId;
+        if (!supplierId) {
+            Toast.error('Tedarikçi seçilmedi');
+            return;
+        }
+        
+        const supplier = await SupplierService.getById(supplierId);
+        if (!supplier || supplier.type !== 'iplik') {
+            Toast.error('Bu işlem sadece iplik tedarikçileri için geçerlidir');
+            return;
+        }
+        
+        const [yarnTypes, priceList] = await Promise.all([
+            YarnTypeService.getAll(),
+            SupplierService.getPriceListBySupplier(supplierId)
+        ]);
+        
+        const rows = yarnTypes.map(yt => {
+            const existing = priceList.find(x => x.yarnTypeId === yt.id);
+            let val = '';
+            if (existing && existing.pricePerKg) {
+                val = existing.pricePerKg;
+            }
+            return `
+                <tr>
+                    <td>${yt.name}</td>
+                    <td>${yt.code || '-'}</td>
+                    <td>
+                        <input type="number" class="yarn-price-input" data-yarn-type-id="${yt.id}" value="${val}" step="0.01" min="0" placeholder="USD/KG">
+                    </td>
+                    <td>
+                        <button class="btn btn-sm btn-primary" onclick="saveYarnTypePrice('${yt.id}')">Kaydet</button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+        
+        const html = `
+            <div class="modal-overlay">
+                <div class="modal" style="width: 700px; max-height: 80vh;">
+                    <div class="modal-header">
+                        <h3>İplik Çeşitleri Fiyat Listesi (USD/KG)</h3>
+                        <button class="modal-close" onclick="ModalManager.hide()">×</button>
+                    </div>
+                    <div class="modal-content">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>İplik Çeşidi</th>
+                                    <th>Kod</th>
+                                    <th>Fiyat (USD/KG)</th>
+                                    <th>İşlem</th>
+                                </tr>
+                            </thead>
+                            <tbody>${rows}</tbody>
+                        </table>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" onclick="ModalManager.hide()">Kapat</button>
+                        <button type="button" class="btn btn-primary" onclick="saveAllYarnTypePrices()">Tümünü Kaydet</button>
+                    </div>
+                </div>
+            </div>`;
+        ModalManager.show(html);
+    } catch (e) {
+        console.error('Yarn type price list modal error:', e);
+        Toast.error('Fiyat listesi yüklenirken hata oluştu');
+    }
+}
+
+async function saveYarnTypePrice(yarnTypeId) {
+    try {
+        const supplierId = window.currentSupplierId;
+        const supplier = await SupplierService.getById(supplierId);
+        if (!supplier || supplier.type !== 'iplik') {
+            Toast.error('Bu işlem sadece iplik tedarikçileri için geçerlidir');
+            return;
+        }
+        
+        const input = document.querySelector(`.yarn-price-input[data-yarn-type-id="${yarnTypeId}"]`);
+        const price = NumberUtils.parseNumber(input.value);
+        if (price < 0) {
+            Toast.error('Fiyat negatif olamaz');
+            return;
+        }
+        
+        // İplik çeşidi fiyatını kaydet (supplierPriceLists tablosuna yarnTypeId ile)
+        const priceData = {
+            supplierId: supplierId,
+            supplierType: 'iplik',
+            yarnTypeId: yarnTypeId,
+            pricePerKg: price,
+            currency: 'USD'
+        };
+        
+        const all = await db.readAll('supplierPriceLists');
+        const existing = all.find(p => p.supplierId === supplierId && p.yarnTypeId === yarnTypeId);
+        
+        if (existing) {
+            existing.pricePerKg = price;
+            existing.updatedAt = new Date().toISOString();
+            await db.update('supplierPriceLists', existing);
+        } else {
+            await db.create('supplierPriceLists', priceData);
+        }
+        
+        Toast.success('Fiyat kaydedildi (USD)');
+    } catch (e) {
+        console.error('saveYarnTypePrice error:', e);
+        Toast.error('Fiyat kaydedilemedi');
+    }
+}
+
+async function saveAllYarnTypePrices() {
+    try {
+        const supplierId = window.currentSupplierId;
+        const supplier = await SupplierService.getById(supplierId);
+        if (!supplier || supplier.type !== 'iplik') {
+            Toast.error('Bu işlem sadece iplik tedarikçileri için geçerlidir');
+            return;
+        }
+        
+        const inputs = document.querySelectorAll('.yarn-price-input');
+        let count = 0;
+        for (const input of inputs) {
+            const price = NumberUtils.parseNumber(input.value);
+            if (price > 0) {
+                const yarnTypeId = input.dataset.yarnTypeId;
+                const priceData = {
+                    supplierId: supplierId,
+                    supplierType: 'iplik',
+                    yarnTypeId: yarnTypeId,
+                    pricePerKg: price,
+                    currency: 'USD'
+                };
+                
+                const all = await db.readAll('supplierPriceLists');
+                const existing = all.find(p => p.supplierId === supplierId && p.yarnTypeId === yarnTypeId);
+                
+                if (existing) {
+                    existing.pricePerKg = price;
+                    existing.updatedAt = new Date().toISOString();
+                    await db.update('supplierPriceLists', existing);
+                } else {
+                    await db.create('supplierPriceLists', priceData);
+                }
+                count++;
+            }
+        }
+        Toast.success(`${count} fiyat kaydedildi (USD)`);
+        ModalManager.hide();
+    } catch (e) {
+        console.error('saveAllYarnTypePrices error:', e);
+        Toast.error('Toplu kayıt sırasında hata');
+    }
+}
+
+// İplik Girişi Modalı (İplik Tedarikçileri için)
+async function showNewYarnShipmentModal() {
+    const supplierId = window.currentSupplierId;
+    if (!supplierId) {
+        Toast.error('Tedarikçi seçilmedi');
+        return;
+    }
+    
+    const supplier = await SupplierService.getById(supplierId);
+    if (!supplier || supplier.type !== 'iplik') {
+        Toast.error('Bu işlem sadece iplik tedarikçileri için geçerlidir');
+        return;
+    }
+    
+    const [yarnTypes, priceList] = await Promise.all([
+        YarnTypeService.getAll(),
+        SupplierService.getPriceListBySupplier(supplierId)
+    ]);
+    
+    const modalHtml = `
+        <div class="modal-overlay">
+            <div class="modal" style="width: 600px;">
+                <div class="modal-header">
+                    <h3>İplik Girişi - ${supplier.name}</h3>
+                    <button class="modal-close" onclick="ModalManager.hide()">×</button>
+                </div>
+                <div class="modal-content">
+                    <form id="yarn-shipment-form">
+                        <div class="form-group">
+                            <label for="yarn-type">İplik Çeşidi *</label>
+                            <select id="yarn-type" name="yarnTypeId" required onchange="updateYarnPrice()">
+                                <option value="">Seçin</option>
+                                ${yarnTypes.map(yt => `<option value="${yt.id}" data-name="${yt.name}">${yt.name}${yt.code ? ` (${yt.code})` : ''}</option>`).join('')}
+                            </select>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="yarn-kg">Miktar (KG) *</label>
+                                <input type="number" id="yarn-kg" name="kg" required step="0.01" min="0.01" 
+                                       placeholder="0.00" onchange="updateYarnTotal()">
+                            </div>
+                            <div class="form-group">
+                                <label for="yarn-date">Tarih *</label>
+                                <input type="date" id="yarn-date" name="date" required 
+                                       value="${DateUtils.getInputDate()}">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="yarn-price-per-kg">Birim Fiyat (USD/kg) *</label>
+                                <input type="number" id="yarn-price-per-kg" name="pricePerKg" required 
+                                       step="0.01" min="0" placeholder="0.00" onchange="updateYarnTotal()">
+                                <small class="form-hint">İplik tedarikçisinin sabit fiyatı</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="yarn-total">Toplam (USD)</label>
+                                <input type="text" id="yarn-total" readonly 
+                                       placeholder="Otomatik hesaplanacak" style="font-weight: bold; color: #2563eb;">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="yarn-note">Not</label>
+                            <textarea id="yarn-note" name="note" 
+                                      placeholder="İsteğe bağlı notlar"></textarea>
+                        </div>
+                        <input type="hidden" name="supplierId" value="${supplierId}">
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="ModalManager.hide()">İptal</button>
+                    <button type="button" class="btn btn-primary" onclick="saveYarnShipment()">Kaydet</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    ModalManager.show(modalHtml);
+    
+    // İplik çeşidi seçildiğinde fiyatı otomatik doldur
+    const yarnTypeSelect = document.getElementById('yarn-type');
+    const priceInput = document.getElementById('yarn-price-per-kg');
+    
+    if (yarnTypeSelect && priceInput) {
+        yarnTypeSelect.addEventListener('change', () => {
+            const yarnTypeId = yarnTypeSelect.value;
+            if (yarnTypeId) {
+                const price = priceList.find(p => p.yarnTypeId === yarnTypeId);
+                if (price && price.pricePerKg) {
+                    priceInput.value = price.pricePerKg.toFixed(2);
+                    updateYarnTotal();
+                }
+            }
+        });
+    }
+}
+
+// İplik girişi toplamını güncelle
+function updateYarnTotal() {
+    const kg = NumberUtils.parseNumber(document.getElementById('yarn-kg')?.value || 0);
+    const pricePerKg = NumberUtils.parseNumber(document.getElementById('yarn-price-per-kg')?.value || 0);
+    const total = NumberUtils.round(kg * pricePerKg, 2);
+    const totalInput = document.getElementById('yarn-total');
+    if (totalInput) {
+        totalInput.value = NumberUtils.formatUSD(total);
+    }
+}
+
+// İplik girişi kaydet
+async function saveYarnShipment() {
+    try {
+        const form = document.getElementById('yarn-shipment-form');
+        if (!form) {
+            Toast.error('Form bulunamadı');
+            return;
+        }
+        
+        const formData = new FormData(form);
+        const supplierId = formData.get('supplierId');
+        const yarnTypeId = formData.get('yarnTypeId');
+        const kg = NumberUtils.parseNumber(formData.get('kg'));
+        const pricePerKg = NumberUtils.parseNumber(formData.get('pricePerKg'));
+        const date = formData.get('date');
+        const note = formData.get('note')?.trim() || '';
+        
+        if (!supplierId || !yarnTypeId || !kg || !pricePerKg || !date) {
+            Toast.error('Lütfen tüm zorunlu alanları doldurun');
+            return;
+        }
+        
+        const supplier = await SupplierService.getById(supplierId);
+        if (!supplier || supplier.type !== 'iplik') {
+            Toast.error('Bu işlem sadece iplik tedarikçileri için geçerlidir');
+            return;
+        }
+        
+        const yarnType = await YarnTypeService.getById(yarnTypeId);
+        if (!yarnType) {
+            Toast.error('İplik çeşidi bulunamadı');
+            return;
+        }
+        
+        const totalCost = NumberUtils.round(kg * pricePerKg, 2);
+        
+        // 1. Yarn Shipment kaydı oluştur
+        const shipmentData = {
+            supplierId: supplierId,
+            yarnTypeId: yarnTypeId,
+            yarnTypeName: yarnType.name,
+            kg: kg,
+            pricePerKg: pricePerKg,
+            totalCost: totalCost,
+            currency: 'USD',
+            date: date,
+            note: note
+        };
+        
+        const shipment = await db.create('yarnShipments', shipmentData);
+        console.log('✅ İplik girişi kaydedildi:', shipment);
+        
+        // 2. ProductionCost oluştur (iplikCost dolu, diğerleri 0)
+        const costData = {
+            lotId: null, // İplik girişi için lot yok
+            productId: null, // İplik girişi için ürün yok
+            supplierId: supplierId,
+            yarnTypeId: yarnTypeId,
+            iplikCost: totalCost, // USD olarak
+            ormeCost: 0,
+            boyahaneCost: 0,
+            totalCost: totalCost,
+            paidAmount: 0,
+            status: 'pending',
+            pricePerKg: pricePerKg,
+            currency: 'USD',
+            yarnShipmentId: shipment.id // İlişki için
+        };
+        
+        const productionCost = await ProductionCostService.create(costData);
+        console.log('✅ ProductionCost oluşturuldu:', productionCost);
+        
+        ModalManager.hide();
+        Toast.success(`İplik girişi kaydedildi: ${kg}kg × $${pricePerKg.toFixed(2)} = ${NumberUtils.formatUSD(totalCost)}`);
+        
+        // Ekstre sayfasını yenile
+        if (document.getElementById('supplier-detail-page')?.classList.contains('active')) {
+            await loadSupplierExtract(supplierId);
+        }
+        
+    } catch (error) {
+        console.error('İplik girişi kaydetme hatası:', error);
+        Toast.error(error.message || 'Kayıt sırasında hata oluştu');
+    }
+}
+
+window.showYarnTypePriceListModal = showYarnTypePriceListModal;
+window.saveYarnTypePrice = saveYarnTypePrice;
+window.saveAllYarnTypePrices = saveAllYarnTypePrices;
+window.showNewYarnShipmentModal = showNewYarnShipmentModal;
+window.saveYarnShipment = saveYarnShipment;
+window.updateYarnTotal = updateYarnTotal;
+window.updateYarnPrice = updateYarnTotal; // Alias
+
+// ==== İPLİK TÜRLERİ YÖNETİM MODALI ====
+async function showYarnTypesManageModal() {
+    try {
+        const yarnTypes = await YarnTypeService.getAll();
+        
+        const typeRows = yarnTypes.length > 0 
+            ? yarnTypes.map(yt => `
+                <tr data-id="${yt.id}">
+                    <td>
+                        <input type="text" class="form-control yarn-type-name" value="${yt.name || ''}" placeholder="İplik adı">
+                    </td>
+                    <td>
+                        <input type="text" class="form-control yarn-type-desc" value="${yt.description || ''}" placeholder="Açıklama (opsiyonel)">
+                    </td>
+                    <td class="text-center">
+                        <button class="action-btn action-btn-delete" onclick="deleteYarnType('${yt.id}')">
+                            🗑️
+                        </button>
+                    </td>
+                </tr>
+            `).join('')
+            : '<tr><td colspan="3" class="text-center">Henüz iplik türü eklenmemiş</td></tr>';
+        
+        const html = `
+        <div class="modal-overlay">
+            <div class="modal" style="width: 600px; max-height: 80vh;">
+                <div class="modal-header">
+                    <h3>🧶 İplik Türleri Yönetimi</h3>
+                    <button class="modal-close" onclick="ModalManager.hide()">×</button>
+                </div>
+                <div class="modal-content" style="max-height: 50vh; overflow-y: auto;">
+                    <div class="form-section">
+                        <h4>Mevcut İplik Türleri</h4>
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>İplik Adı</th>
+                                    <th>Açıklama</th>
+                                    <th style="width: 60px;">Sil</th>
+                                </tr>
+                            </thead>
+                            <tbody id="yarn-types-list">
+                                ${typeRows}
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <div class="form-section" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #e5e7eb;">
+                        <h4>Yeni İplik Türü Ekle</h4>
+                        <div class="form-row">
+                            <div class="form-group" style="flex: 2;">
+                                <label>İplik Adı *</label>
+                                <input type="text" id="new-yarn-type-name" class="form-control" placeholder="Örn: Pamuk 30/1">
+                            </div>
+                            <div class="form-group" style="flex: 2;">
+                                <label>Açıklama</label>
+                                <input type="text" id="new-yarn-type-desc" class="form-control" placeholder="Opsiyonel açıklama">
+                            </div>
+                            <div class="form-group" style="flex: 1; display: flex; align-items: flex-end;">
+                                <button class="btn btn-success" onclick="addYarnType()" style="width: 100%;">
+                                    + Ekle
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" onclick="ModalManager.hide()">Kapat</button>
+                    <button class="btn btn-primary" onclick="saveAllYarnTypes()">Değişiklikleri Kaydet</button>
+                </div>
+            </div>
+        </div>`;
+        
+        ModalManager.show(html);
+        
+    } catch (error) {
+        console.error('Yarn types modal error:', error);
+        Toast.error('İplik türleri yüklenirken hata oluştu');
+    }
+}
+
+async function addYarnType() {
+    try {
+        const nameInput = document.getElementById('new-yarn-type-name');
+        const descInput = document.getElementById('new-yarn-type-desc');
+        
+        const name = nameInput.value.trim();
+        const description = descInput.value.trim();
+        
+        if (!name) {
+            Toast.error('İplik adı zorunludur');
+            return;
+        }
+        
+        await YarnTypeService.create({ name, description });
+        Toast.success('İplik türü eklendi');
+        
+        // Modal'ı yenile
+        await showYarnTypesManageModal();
+        
+    } catch (error) {
+        console.error('Add yarn type error:', error);
+        Toast.error(error.message || 'İplik türü eklenirken hata oluştu');
+    }
+}
+
+async function deleteYarnType(id) {
+    try {
+        if (!confirm('Bu iplik türünü silmek istediğinizden emin misiniz?')) {
+            return;
+        }
+        
+        await YarnTypeService.delete(id);
+        Toast.success('İplik türü silindi');
+        
+        // Modal'ı yenile
+        await showYarnTypesManageModal();
+        
+    } catch (error) {
+        console.error('Delete yarn type error:', error);
+        Toast.error(error.message || 'İplik türü silinirken hata oluştu');
+    }
+}
+
+async function saveAllYarnTypes() {
+    try {
+        const rows = document.querySelectorAll('#yarn-types-list tr[data-id]');
+        let updated = 0;
+        
+        for (const row of rows) {
+            const id = row.dataset.id;
+            const nameInput = row.querySelector('.yarn-type-name');
+            const descInput = row.querySelector('.yarn-type-desc');
+            
+            if (!nameInput) continue;
+            
+            const name = nameInput.value.trim();
+            const description = descInput ? descInput.value.trim() : '';
+            
+            if (!name) continue;
+            
+            await YarnTypeService.update({ id, name, description });
+            updated++;
+        }
+        
+        Toast.success(`${updated} iplik türü güncellendi`);
+        ModalManager.hide();
+        
+    } catch (error) {
+        console.error('Save yarn types error:', error);
+        Toast.error(error.message || 'İplik türleri kaydedilirken hata oluştu');
+    }
+}
+
+window.showYarnTypesManageModal = showYarnTypesManageModal;
+window.addYarnType = addYarnType;
+window.deleteYarnType = deleteYarnType;
+window.saveAllYarnTypes = saveAllYarnTypes;
+
+// Statement modal for Raw USD Balance
+async function showRawBalanceStatementModal() {
+    try {
+        const { rows, balance } = await RawBalanceService.getStatement();
+        const tableRows = rows.map(r => `
+            <tr>
+                <td>${DateUtils.formatDate(r.date)}</td>
+                <td>${r.description}</td>
+                <td class="text-right">${r.kg ? NumberUtils.formatKg(r.kg) : '-'}</td>
+                <td class="text-right">${r.pricePerKg ? NumberUtils.formatUnitPrice(r.pricePerKg) : '-'}</td>
+                <td class="text-right text-danger">${r.type !== 'payment' ? NumberUtils.formatUSD(r.amountUsd) : '-'}</td>
+                <td class="text-right text-success">${r.type === 'payment' ? NumberUtils.formatUSD(r.amountUsd) : '-'}</td>
+                <td class="text-right">${NumberUtils.formatUSD(r.runningBalance)}</td>
+            </tr>
+        `).join('') || '<tr><td colspan="7" class="text-center">Hareket yok</td></tr>';
+
+        const html = `
+        <div class="modal-overlay">
+            <div class="modal" style="width: 860px;">
+                <div class="modal-header">
+                    <h3>Ham USD Cari Hareketleri</h3>
+                    <button class="modal-close" onclick="ModalManager.hide()">×</button>
+                </div>
+                <div class="modal-content">
+                    <div class="simple-summary" style="margin-bottom:8px;">
+                        <div class="summary-row">
+                            <div class="summary-item total">
+                                <span class="label">Güncel Bakiye:</span>
+                                <span class="amount">${NumberUtils.formatUSD(balance)}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="table-container">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Tarih</th>
+                                    <th>Açıklama</th>
+                                    <th class="text-right">Kg</th>
+                                    <th class="text-right">USD/kg</th>
+                                    <th class="text-right">Borç (USD)</th>
+                                    <th class="text-right">Ödeme (USD)</th>
+                                    <th class="text-right">Bakiye (USD)</th>
+                                </tr>
+                            </thead>
+                            <tbody>${tableRows}</tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn" onclick="ModalManager.hide()">Kapat</button>
+                </div>
+            </div>
+        </div>`;
+        ModalManager.show(html);
+    } catch (e) {
+        console.error('showRawBalanceStatementModal error:', e);
+        Toast.error('Hareketler yüklenemedi');
+    }
+}
+
+// --- RAW USD AÇILIŞ BAKİYESİ MODALI ---
+function showRawOpeningModal() {
+    const html = `
+    <div class="modal-overlay">
+        <div class="modal" style="width: 420px;">
+            <div class="modal-header">
+                <h3>Ham USD Açılış Bakiyesi</h3>
+                <button class="modal-close" onclick="ModalManager.hide()">×</button>
+            </div>
+            <div class="modal-content">
+                <form id="raw-opening-form">
+                    <div class="form-group">
+                        <label for="opening-date">Tarih *</label>
+                        <input type="date" id="opening-date" name="date" required value="${DateUtils.getInputDate()}">
+                    </div>
+                    <div class="form-group">
+                        <label for="opening-amount">Tutar (USD) *</label>
+                        <input type="number" id="opening-amount" name="amountUsd" step="0.01" min="0" required placeholder="0.00">
+                    </div>
+                    <div class="form-group">
+                        <label for="opening-note">Not</label>
+                        <textarea id="opening-note" name="note" placeholder="İsteğe bağlı"></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="ModalManager.hide()">İptal</button>
+                <button class="btn btn-primary" onclick="saveRawOpening()">Kaydet</button>
+            </div>
+        </div>
+    </div>`;
+    ModalManager.show(html);
+}
+
+async function saveRawOpening() {
+    try {
+        const f = document.getElementById('raw-opening-form');
+        const fd = new FormData(f);
+        const date = fd.get('date');
+        const amountUsd = NumberUtils.parseNumber(fd.get('amountUsd'));
+        const note = (fd.get('note') || '').trim();
+        if (!date || !(amountUsd >= 0)) { throw new Error('Tarih ve tutar zorunludur'); }
+        await RawBalanceService.addOpeningBalance(amountUsd, date);
+        ModalManager.hide();
+        Toast.success('Açılış bakiyesi kaydedildi');
+    } catch (e) {
+        console.error('saveRawOpening error:', e);
+        Toast.error(e.message || 'Açılış bakiyesi kaydedilemedi');
+    }
+}
+
+// --- RAW USD ÖDEME MODALI ---
+function showRawUsdPaymentModal() {
+    const html = `
+    <div class="modal-overlay">
+        <div class="modal" style="width: 420px;">
+            <div class="modal-header">
+                <h3>Ham USD Ödeme</h3>
+                <button class="modal-close" onclick="ModalManager.hide()">×</button>
+            </div>
+            <div class="modal-content">
+                <form id="raw-usd-payment-form">
+                    <div class="form-group">
+                        <label for="rp-date">Tarih *</label>
+                        <input type="date" id="rp-date" name="date" required value="${DateUtils.getInputDate()}">
+                    </div>
+                    <div class="form-group">
+                        <label for="rp-amount">Tutar (USD) *</label>
+                        <input type="number" id="rp-amount" name="amountUsd" step="0.01" min="0.01" required placeholder="0.00">
+                    </div>
+                    <div class="form-group">
+                        <label for="rp-note">Not</label>
+                        <input type="text" id="rp-note" name="note" placeholder="İsteğe bağlı">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="ModalManager.hide()">İptal</button>
+                <button class="btn btn-primary" onclick="saveRawUsdPayment()">Kaydet</button>
+            </div>
+        </div>
+    </div>`;
+    ModalManager.show(html);
+}
+
+async function saveRawUsdPayment() {
+    try {
+        const f = document.getElementById('raw-usd-payment-form');
+        const fd = new FormData(f);
+        const date = fd.get('date');
+        const amountUsd = NumberUtils.parseNumber(fd.get('amountUsd'));
+        const note = (fd.get('note') || '').trim();
+        if (!date || !(amountUsd > 0)) { throw new Error('Tarih ve tutar zorunludur'); }
+        await RawBalanceService.addPayment({ amountUsd, method: '', note, date });
+        ModalManager.hide();
+        Toast.success('Ödeme kaydedildi');
+    } catch (e) {
+        console.error('saveRawUsdPayment error:', e);
+        Toast.error(e.message || 'USD ödeme kaydedilemedi');
+    }
+}
+
+// --- TEDARİKÇİ HIZLI MAKBUZ (Placeholder) ---
+function showSupplierQuickReceiptModal() {
+    const html = `
+    <div class="modal-overlay">
+        <div class="modal" style="width:420px;">
+            <div class="modal-header">
+                <h3>Tedarikçi Hızlı Makbuz</h3>
+                <button class="modal-close" onclick="ModalManager.hide()">×</button>
+            </div>
+            <div class="modal-content">
+                <div class="alert alert-info">Bu özellik henüz tamamlanmadı. Demo içerik.</div>
+                <button class="btn btn-primary" onclick="printSupplierQuickReceipt()">Yazdır (Demo)</button>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="ModalManager.hide()">Kapat</button>
+            </div>
+        </div>
+    </div>`;
+    ModalManager.show(html);
+}
+
+function printSupplierQuickReceipt() {
+    console.warn('printSupplierQuickReceipt: demo stub çağrıldı.');
+    Toast.info('Makbuz yazdırma demo: henüz gerçek veri bağlı değil');
+}
+
+// =========================
+// SAFE GLOBAL EXPOSE (REPLACE)
+// =========================
+(function exposeGlobalsSafely() {
+    const g = window;
+    const bind = (name, fn) => {
+        if (typeof fn === 'function' && typeof g[name] !== 'function') g[name] = fn;
+    };
+    // mevcutlar
+    bind('ModalManager', ModalManager);
+    bind('showNewCustomerModal', showNewCustomerModal);
+    bind('showNewProductModal', showNewProductModal);
+    bind('showNewLotModal', showNewLotModal);
+    bind('showNewPaymentModalFromModals', showNewPaymentModal);
+    bind('showNewPaymentModal', showNewPaymentModal);
+    bind('showNewShipmentModal', showNewShipmentModal);
+    bind('showConfirmModal', showConfirmModal);
+    bind('showImportCSVModal', showImportCSVModal);
+    bind('showImportDataModal', showImportDataModal);
+    bind('selectLot', selectLot);
+    bind('updateLineTotal', updateLineTotal);
+    bind('removeLine', removeLine);
+    bind('addShipmentLine', addShipmentLine);
+    bind('addShipmentLineByParty', addShipmentLineByParty);
+    bind('saveShipment', saveShipment);
+    bind('saveCustomer', saveCustomer);
+    bind('saveProduct', saveProduct);
+    bind('saveLot', saveLot);
+    bind('savePayment', savePayment);
+    bind('confirmAction', confirmAction);
+    bind('confirmActionAsync', confirmActionAsync);
+    bind('importCSV', importCSV);
+    bind('importData', importData);
+    bind('showNewSupplierModal', showNewSupplierModal);
+    bind('showNewSupplierPaymentModal', showNewSupplierPaymentModal);
+    bind('saveSupplier', saveSupplier);
+    bind('saveSupplierPayment', saveSupplierPayment);
+    bind('loadExchangeRate', loadExchangeRate);
+    bind('updateExchangeRate', updateExchangeRate);
+    bind('onExchangeRateChange', onExchangeRateChange);
+    bind('updatePaymentCurrency', updatePaymentCurrency);
+    bind('updatePaymentAmount', updatePaymentAmount);
+    bind('updatePaymentExchangeRate', updatePaymentExchangeRate);
+    bind('showPriceListModal', showPriceListModal);
+    bind('saveProductPrice', saveProductPrice);
+    bind('saveAllPrices', saveAllPrices);
+    bind('showSupplierPriceListModal', showSupplierPriceListModal);
+    bind('saveSupplierProductPrice', saveSupplierProductPrice);
+    bind('saveAllSupplierPrices', saveAllSupplierPrices);
+    bind('showRawBalanceStatementModal', showRawBalanceStatementModal);
+    // eksikler (yeni eklediklerimiz)
+    bind('showRawOpeningModal', showRawOpeningModal);
+    bind('saveRawOpening', saveRawOpening);
+    bind('showRawUsdPaymentModal', showRawUsdPaymentModal);
+    bind('saveRawUsdPayment', saveRawUsdPayment);
+    bind('showSupplierQuickReceiptModal', showSupplierQuickReceiptModal);
+    bind('printSupplierQuickReceipt', printSupplierQuickReceipt);
+})();
+
+// --- CASCADE DELETE: raw lot silinince ham USD cari kaydını da sil ---
+(function attachInventoryLotCascadeDelete() {
+    // db henüz yüklenmemişse bekle (max 10 saniye)
+    let attempts = 0;
+    const maxAttempts = 100;
+    
+    const tryAttach = () => {
+        attempts++;
+        
+        // window.db yoksa ve deneme hakkı kaldıysa bekle
+        if (!window.db) {
+            if (attempts < maxAttempts) {
+                setTimeout(tryAttach, 100);
+            }
+            // Sessizce çık, uyarı verme
+            return;
+        }
+        
+        // Firebase Firestore kullanılıyorsa delete fonksiyonu farklı bir yapıda olabilir
+        // Bu durumda sessizce çık, hook ekleme
+        if (typeof window.db.delete !== 'function') {
+            // Sessizce çık - Firebase senaryosunda bu normaldir
+            return;
+        }
+        
+        // Hook'u ekle
+        attachHook();
+    };
+    
+    const attachHook = () => {
+        // Son kontrol
+        if (typeof window.db.delete !== 'function') {
+            return;
+        }
+
+        const originalDelete = window.db.delete.bind(window.db);
+
+        window.db.delete = async function(storeName, id) {
+            // inventoryLots dışı ise aynen çalış
+            if (storeName !== 'inventoryLots') {
+                return originalDelete(storeName, id);
+            }
+
+            // Silmeden önce lot'u oku (isRaw ve id kontrolü için)
+            let lot = null;
+            try { lot = await window.db.read('inventoryLots', id); } catch (e) { /* sessiz */ }
+
+            const res = await originalDelete(storeName, id);
+
+            try {
+                if (lot && lot.isRaw) {
+                    // Önce RawBalanceService varsa onu kullan
+                    if (window.RawBalanceService && typeof window.RawBalanceService.removeByLotId === 'function') {
+                        await window.RawBalanceService.removeByLotId(id);
+                    } else {
+                        // Fallback: Servis yoksa lotId ile tek tek sil
+                        let items = [];
+                        try {
+                            items = await window.db.readAll('rawBalances');
+                        } catch (e) {
+                            // sessiz geç
+                        }
+                        for (const it of (items || [])) {
+                            const rid = it?.id || it?.docId || it;
+                            if (it && (it.lotId === id)) {
+                                try {
+                                    await window.db.delete('rawBalances', rid);
+                                } catch (e) {
+                                    // sessiz geç
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+                // Ham cari kaskad silme hatası - sessiz geç
+            }
+
+            // Dashboard sayfası açıksa yenile (opsiyonel)
+            try {
+                if (document.getElementById('dashboard-page')?.classList.contains('active')) {
+                    await window.loadDashboard?.();
+                }
+            } catch (e) {
+                // sessiz geç
+            }
+
+            return res;
+        };
+
+        // Hook başarıyla eklendi (sadece IndexedDB senaryosunda)
+        // console.log('✅ cascadeDelete hook aktif'); // Gerekirse açılabilir
+    };
+    
+    // İlk denemeyi başlat
+    tryAttach();
+})();

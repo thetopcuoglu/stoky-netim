@@ -8,7 +8,7 @@ async function main() {
         
         try {
             console.log('Firebase veritabanı başlatılıyor...');
-            const { initializeFirebase, FirestoreDatabase } = await import('./firebase-config.js');
+            const { initializeFirebase, FirestoreDatabase } = await import('./firebase-config.js?v=108');
             const result = await initializeFirebase();
             if (result.success) {
                 window.db = new FirestoreDatabase(result.db);
@@ -170,22 +170,19 @@ async function loadPageContent(pageId, customerId = null) {
             await loadSuppliersPage();
             break;
         case 'supplier-detail':
-            // localStorage'dan supplier ID'yi al
+            // localStorage'dan supplier ID'yi al ve HEMEN window'a set et
             const supplierId = localStorage.getItem('currentSupplierId') || window.currentSupplierId;
+            
             console.log('🔍 Supplier detail case - ID:', supplierId);
-            console.log('🔍 localStorage currentSupplierId:', localStorage.getItem('currentSupplierId'));
-            console.log('🔍 window.currentSupplierId:', window.currentSupplierId);
             
             if (supplierId) {
+                // window.currentSupplierId'yi hemen set et
                 window.currentSupplierId = supplierId;
-                // Sayfa değiştir ve navigation'ı güncelle
-                document.querySelectorAll('.page').forEach(page => {
-                    page.classList.remove('active');
-                });
-                const targetPage = document.getElementById('supplier-detail-page');
-                if (targetPage) {
-                    targetPage.classList.add('active');
-                }
+                
+                // showSupplierDetail fonksiyonu tüm işleri yapacak:
+                // - Sayfa değişimi
+                // - Buton güncellemeleri
+                // - Ekstre yükleme
                 await showSupplierDetail(supplierId);
             } else {
                 console.log('❌ Supplier ID bulunamadı, ana sayfaya yönlendiriliyor');
@@ -368,6 +365,339 @@ async function generatePaymentReport() {
         Toast.error('Rapor oluşturulurken hata oluştu');
     } finally {
         LoadingState.hide();
+    }
+}
+
+async function generateDailyReport() {
+    try {
+        LoadingState.show();
+        
+        const form = document.getElementById('daily-report-form');
+        const formData = new FormData(form);
+        const customerId = formData.get('customerId');
+        const date = formData.get('date');
+        
+        if (!customerId || !date) {
+            Toast.error('Lütfen firma ve tarih seçin');
+            return;
+        }
+        
+        // Get customer info
+        const customer = await CustomerService.getById(customerId);
+        if (!customer) {
+            Toast.error('Müşteri bulunamadı');
+            return;
+        }
+        
+        // Get shipments for the specific date and customer
+        const shipments = await ShipmentService.getByCustomerId(customerId);
+        const dailyShipments = shipments.filter(shipment => {
+            const shipmentDate = new Date(shipment.date).toISOString().split('T')[0];
+            return shipmentDate === date;
+        });
+        
+        if (dailyShipments.length === 0) {
+            Toast.info(`${customer.name} için ${date} tarihinde sevk bulunamadı`);
+            ModalManager.hide();
+            return;
+        }
+        
+        // Get products and lots for enrichment
+        const products = await ProductService.getAll();
+        const lots = await InventoryService.getAll();
+        
+        const reportData = [];
+        
+        // Process each shipment
+        dailyShipments.forEach(shipment => {
+            shipment.lines?.forEach(line => {
+                const product = products.find(p => p.id === line.productId);
+                const lot = lots.find(l => l.id === line.lotId);
+                
+                reportData.push({
+                    'Sevk No': shipment.id.substr(-6).toUpperCase(),
+                    'Ürün': product?.name || 'Bilinmeyen Ürün',
+                    'Parti No': lot?.party || 'Bilinmeyen Parti',
+                    'Kg': Number(line.kg || 0).toFixed(2),
+                    'Top': Number(line.tops || 0).toFixed(0),
+                    'Birim Fiyat': NumberUtils.formatUSD(line.unitUsd || 0),
+                    'Toplam': NumberUtils.formatUSD(line.lineTotalUsd || 0)
+                });
+            });
+        });
+        
+        // Sort by shipment date and product
+        reportData.sort((a, b) => {
+            const aProduct = a['Ürün'];
+            const bProduct = b['Ürün'];
+            if (aProduct !== bProduct) {
+                return aProduct.localeCompare(bProduct);
+            }
+            return a['Parti No'].localeCompare(b['Parti No']);
+        });
+        
+        // Calculate totals
+        const totalKg = reportData.reduce((sum, row) => sum + NumberUtils.parseNumber(row['Kg']), 0);
+        const totalTops = reportData.reduce((sum, row) => sum + NumberUtils.parseNumber(row['Top']), 0);
+        const totalUsd = reportData.reduce((sum, row) => {
+            const amount = row['Toplam'].replace('$', '').replace(',', '');
+            return sum + NumberUtils.parseNumber(amount);
+        }, 0);
+        
+        // Add summary row
+        reportData.push({
+            'Sevk No': 'TOPLAM',
+            'Ürün': '',
+            'Parti No': '',
+            'Kg': Number(totalKg).toFixed(2),
+            'Top': Number(totalTops).toFixed(0),
+            'Birim Fiyat': '',
+            'Toplam': NumberUtils.formatUSD(totalUsd)
+        });
+        
+        const reportTitle = `${customer.name} - Günlük Sevk Raporu (${date})`;
+        displayReport(reportTitle, reportData);
+        
+        // Show print button for daily reports
+        const printBtn = document.getElementById('print-daily-report-btn');
+        if (printBtn) {
+            printBtn.style.display = 'inline-flex';
+            printBtn.onclick = () => printDailyReport(customer.name, date, reportData);
+        }
+        
+        ModalManager.hide();
+        
+    } catch (error) {
+        console.error('Daily report error:', error);
+        Toast.error('Rapor oluşturulurken hata oluştu');
+    } finally {
+        LoadingState.hide();
+    }
+}
+
+// Print Daily Report as PDF
+async function printDailyReport(customerName, date, reportData) {
+    try {
+        console.log('🖨️ Günlük rapor PDF yazdırma başlatıldı:', customerName, date);
+        
+        // Format date for display
+        const formattedDate = DateUtils.formatDate(new Date(date));
+        
+        // Create print content
+        const printContent = `
+            <div class="printable">
+                <div class="print-header">
+                    <div class="company-logo-text">MESHSOFT</div>
+                    <div class="document-title">Günlük Sevk Raporu</div>
+                </div>
+                
+                <div class="print-info-section">
+                    <div class="print-info-row">
+                        <span class="print-info-label">Firma:</span>
+                        <span>${customerName}</span>
+                    </div>
+                    <div class="print-info-row">
+                        <span class="print-info-label">Tarih:</span>
+                        <span>${formattedDate}</span>
+                    </div>
+                    <div class="print-info-row">
+                        <span class="print-info-label">Rapor Tarihi:</span>
+                        <span>${DateUtils.formatDateTime(new Date())}</span>
+                    </div>
+                </div>
+                
+                <table class="print-table">
+                    <thead>
+                        <tr>
+                            <th>Sevk No</th>
+                            <th>Ürün</th>
+                            <th>Parti No</th>
+                            <th class="text-right">Kg</th>
+                            <th class="text-right">Top</th>
+                            <th class="text-right">Birim Fiyat</th>
+                            <th class="text-right">Toplam</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${reportData.map(row => `
+                            <tr ${row['Sevk No'] === 'TOPLAM' ? 'style="font-weight: bold; background-color: #f0f0f0;"' : ''}>
+                                <td>${row['Sevk No']}</td>
+                                <td>${row['Ürün']}</td>
+                                <td>${row['Parti No']}</td>
+                                <td class="text-right">${row['Kg']}</td>
+                                <td class="text-right">${row['Top']}</td>
+                                <td class="text-right">${row['Birim Fiyat']}</td>
+                                <td class="text-right">${row['Toplam']}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+                
+                <div class="print-signature">
+                    <div class="signature-box">
+                        <div class="signature-line">Firma Yetkilisi</div>
+                    </div>
+                    <div class="signature-box">
+                        <div class="signature-line">Müşteri</div>
+                    </div>
+                </div>
+                
+                <div class="print-footer">
+                    Yazdırma Tarihi: ${DateUtils.formatDateTime(new Date())}
+                </div>
+            </div>
+        `;
+        
+        // Create full HTML document
+        const fullHtml = `
+            <!DOCTYPE html>
+            <html lang="tr">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Günlük Sevk Raporu - ${customerName}</title>
+                <style>
+                    @media print { 
+                        @page { margin: 1cm; size: A4; } 
+                    }
+                    body { 
+                        font-family: Arial, sans-serif; 
+                        margin: 0; 
+                        padding: 20px; 
+                        background: white; 
+                        color: black; 
+                        font-size: 10pt; 
+                        line-height: 1.3; 
+                    }
+                    .printable { 
+                        max-width: 800px; 
+                        margin: 0 auto; 
+                    }
+                    .print-header { 
+                        text-align: center; 
+                        margin-bottom: 14pt; 
+                        border-bottom: 1pt solid #111827; 
+                        padding-bottom: 8pt; 
+                        background: linear-gradient(180deg, #111827 0%, #1f2937 100%); 
+                        color: white; 
+                        border-radius: 6px; 
+                    }
+                    .company-logo-text { 
+                        font-size: 16pt; 
+                        font-weight: 700; 
+                        margin: 6pt 0 4pt 0; 
+                        letter-spacing: .5pt; 
+                    }
+                    .document-title { 
+                        font-size: 13pt; 
+                        font-weight: 700; 
+                        text-transform: uppercase; 
+                        display: inline-block; 
+                        padding: 4pt 8pt; 
+                        border: 1pt solid white; 
+                        border-radius: 4px; 
+                    }
+                    .print-info-section { 
+                        display: grid; 
+                        grid-template-columns: 1fr 1fr 1fr; 
+                        gap: 6pt; 
+                        margin: 10pt 0; 
+                    }
+                    .print-info-row { 
+                        font-size: 9pt; 
+                        color: #111827; 
+                        background: #f3f4f6; 
+                        padding: 6pt; 
+                        border: 1pt solid #e5e7eb; 
+                        border-radius: 4px; 
+                    }
+                    .print-info-label { 
+                        font-weight: 700; 
+                        color: #374151; 
+                        margin-right: 4pt; 
+                    }
+                    .print-table { 
+                        width: 100%; 
+                        border-collapse: collapse; 
+                        margin: 8pt 0; 
+                    }
+                    .print-table th { 
+                        background-color: #f3f4f6; 
+                        border: 1pt solid #111827; 
+                        padding: 6pt; 
+                        font-weight: 700; 
+                        font-size: 9pt; 
+                    }
+                    .print-table td { 
+                        border: 1pt solid #111827; 
+                        padding: 6pt; 
+                        font-size: 9pt; 
+                    }
+                    .text-right { 
+                        text-align: right; 
+                    }
+                    .print-signature { 
+                        margin-top: 16pt; 
+                        display: flex; 
+                        justify-content: space-between; 
+                        gap: 12pt; 
+                    }
+                    .signature-box { 
+                        width: 48%; 
+                        text-align: center; 
+                    }
+                    .signature-line { 
+                        border-top: 1pt solid #111827; 
+                        margin-top: 18pt; 
+                        padding-top: 6pt; 
+                        font-size: 9pt; 
+                    }
+                    .print-footer { 
+                        margin-top: 10pt; 
+                        text-align: center; 
+                        font-size: 8pt; 
+                        color: #6b7280; 
+                    }
+                </style>
+            </head>
+            <body>
+                ${printContent}
+            </body>
+            </html>
+        `;
+        
+        // Open print window
+        const blob = new Blob([fullHtml], { type: 'text/html;charset=utf-8' });
+        const blobUrl = URL.createObjectURL(blob);
+        const printWindow = window.open(blobUrl, '_blank', 'width=860,height=700');
+        
+        if (!printWindow) {
+            throw new Error('Popup engelleyici aktif. Lütfen bu site için pop-up izni verin.');
+        }
+        
+        const finish = () => {
+            try { 
+                printWindow.focus(); 
+                printWindow.print(); 
+            } catch (e) { 
+                console.error('Print error:', e); 
+            }
+            setTimeout(() => {
+                try { 
+                    URL.revokeObjectURL(blobUrl); 
+                    printWindow.close(); 
+                } catch (e) {}
+            }, 150);
+        };
+        
+        printWindow.onload = finish;
+        setTimeout(finish, 400);
+        
+        Toast.success('PDF yazdırma penceresi açılıyor...');
+        
+    } catch (error) {
+        console.error('Print daily report error:', error);
+        Toast.error('PDF yazdırılırken hata oluştu');
     }
 }
 
@@ -850,11 +1180,22 @@ async function printCustomerStatement() {
                         font-weight: bold;
                         border-right: 1px solid #555;
                     }
+                    .print-table th:first-child { width: 10%; }
+                    .print-table th:nth-child(2) { width: 45%; } /* Açıklama sütunu daha geniş */
+                    .print-table th:nth-child(3),
+                    .print-table th:nth-child(4),
+                    .print-table th:nth-child(5) { width: 15%; }
                     .print-table th:last-child { border-right: none; }
                     .print-table td {
                         padding: 10px 8px;
                         border-bottom: 1px solid #eee;
                         border-right: 1px solid #f5f5f5;
+                        word-wrap: break-word;
+                        max-width: 0;
+                    }
+                    .print-table td:nth-child(2) { 
+                        font-size: 10px;
+                        line-height: 1.3;
                     }
                     .print-table td:last-child { border-right: none; }
                     .print-table tr:nth-child(even) { background: #f9f9f9; }
